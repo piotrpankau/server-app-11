@@ -16,6 +16,7 @@ const { createFiles, HttpError } = require('./lib/files');
 const terminal = require('./lib/terminal');
 const assistant = require('./lib/assistant');
 const games = require('./lib/games');
+const gamecatalog = require('./lib/gamecatalog');
 
 const cfg = config.load();
 if (!cfg.sessionSecret || (!cfg.passwordHash && !(cfg.users && cfg.users.length))) {
@@ -439,6 +440,16 @@ function loadGame(req) {
 const gameLog = (req, text) => sessions.log(req.sid, 'game', text);
 
 app.get('/api/games/templates', (req, res) => res.json(games.templateList()));
+app.get('/api/games/catalog', wrap(async (req, res) => {
+  const q = String(req.query.q || '');
+  const [catalog, steam] = await Promise.all([
+    Promise.resolve(gamecatalog.search(q)),
+    q.trim().length >= 2 ? gamecatalog.steamSearch(q) : Promise.resolve([])
+  ]);
+  // Drop live Steam hits that duplicate a catalog game (by name).
+  const names = new Set(catalog.map((c) => c.name.toLowerCase()));
+  res.json({ catalog, steam: steam.filter((s) => !names.has(s.name.toLowerCase())) });
+}));
 app.get('/api/games', (req, res) => res.json(games.visibleTo(req.user).map((s) => games.pub(s, req.user))));
 app.post('/api/games', json, wrap(async (req, res) => {
   const s = games.create(req.user, req.body || {});

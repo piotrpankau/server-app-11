@@ -246,35 +246,82 @@
     // ----- create wizard (pick game -> fill settings -> create) -----
     async function createWizard() {
       if (!templates.length) try { templates = await api.get('/api/games/templates'); } catch (err) { return WD.error(err); }
-      const t = await pickTemplate();
-      if (!t) return;
-      await settingsDialog(t);
+      const choice = await searchDialog();
+      if (!choice) return;
+      const t = templates.find((x) => x.id === choice.template);
+      await settingsDialog(t, choice.prefill, choice.title);
     }
 
-    function pickTemplate() {
+    // Search a game by name -> get install data automatically (Steam AppID, start command, ports).
+    function searchDialog() {
       return new Promise((resolve) => {
-        const grid = h('div', { class: 'gm-tpls' }, ...templates.map((t) => h('button', { class: 'gm-tpl', onclick: () => { resolve(t); close(); } },
-          h('span', { class: 'gm-tico', style: { background: t.icon } }, h('span', { html: WD.appIcon('games') })),
-          h('span', { class: 'gm-tlabel' }, t.label),
-          t.steam ? h('span', { class: 'gm-tag' }, 'Steam') : t.java ? h('span', { class: 'gm-tag' }, 'Java') : h('span', { class: 'gm-tag' }, 'własne'))));
-        let close;
-        WD.dialog({ title: 'Nowy serwer – wybierz grę', body: h('div', {}, grid), buttons: [{ label: 'Anuluj', value: null }], onOpen: (dlg) => { close = () => { const b = dlg.parentNode.querySelector('.d-actions .btn'); if (b) b.click(); }; } }).then(() => resolve(null));
+        let done = false;
+        const finish = (val) => { if (done) return; done = true; const b = document.querySelector('.modal-backdrop .d-actions .btn'); if (b) b.click(); resolve(val); };
+        const input = h('input', { class: 'field', placeholder: 'Wpisz nazwę gry, np. Rust, Palworld, ARK…', spellcheck: 'false' });
+        const results = h('div', { class: 'gm-results' });
+        const catIcon = (g) => {
+          const fallback = h('span', { html: WD.appIcon('games') });
+          if (!g.image) return h('span', { class: 'gm-tico', style: { background: g.icon || '#3a6ea5' } }, fallback);
+          const img = h('img', { src: g.image, alt: '', style: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }, onerror: function () { this.replaceWith(fallback); } });
+          return h('span', { class: 'gm-tico', style: { background: g.icon || '#3a6ea5' } }, img);
+        };
+
+        function row(opts) {
+          return h('button', { class: 'gm-result', onclick: () => finish(opts.choice) },
+            catIcon(opts),
+            h('div', { class: 'gm-rtext' }, h('div', { class: 'gm-rname' }, opts.name), h('div', { class: 'gm-rsub' }, opts.sub)),
+            h('span', { class: 'gm-tag' }, opts.tag));
+        }
+
+        function renderResults(data, q) {
+          const rows = [];
+          for (const c of data.catalog) {
+            const tmpl = templates.find((t) => t.id === (c.template || 'steam_custom'));
+            const prefill = c.template ? null : { appId: c.appId, startCmd: c.startCmd || '', ports: (c.ports || []).join(', '), anonymous: true };
+            rows.push(row({ name: c.name, image: c.gameAppId ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${c.gameAppId}/header.jpg` : null,
+              sub: c.template ? 'Gotowy szablon' : 'AppID ' + c.appId + (c.ports ? ' · ' + c.ports.join(', ') : ''),
+              tag: c.template ? (tmpl && tmpl.java ? 'Java' : 'Steam') : 'Steam',
+              choice: { template: c.template || 'steam_custom', prefill, title: c.name } }));
+          }
+          for (const s of (data.steam || [])) {
+            rows.push(row({ name: s.name, image: s.image,
+              sub: 'AppID gry ' + s.appId + ' – komendę startową trzeba uzupełnić',
+              tag: 'Steam',
+              choice: { template: 'steam_custom', prefill: { appId: s.appId, startCmd: '', ports: '', anonymous: true }, title: s.name } }));
+          }
+          // Always offer the manual / custom options.
+          rows.push(row({ name: 'Inna gra ze Steam (ręcznie)', sub: 'Podaj AppID i komendę startową samodzielnie', tag: 'Steam', choice: { template: 'steam_custom', prefill: null, title: 'Serwer Steam' } }));
+          rows.push(row({ name: 'Własny serwer (dowolne polecenie)', sub: 'Uruchom dowolny program jako serwer', tag: 'własne', choice: { template: 'command', prefill: null, title: 'Serwer' } }));
+          results.replaceChildren(...rows);
+          if (!data.catalog.length && !(data.steam || []).length && q) results.insertBefore(h('div', { class: 'tm-dim', style: { padding: '4px 2px' } }, 'Brak dopasowań w katalogu ani w Steam. Użyj opcji ręcznych poniżej.'), results.firstChild);
+        }
+
+        let timer;
+        const search = async () => {
+          const q = input.value.trim();
+          try { renderResults(await api.get('/api/games/catalog', { q }), q); } catch (err) { WD.error(err); }
+        };
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+        WD.dialog({ title: 'Nowy serwer – wyszukaj grę', body: h('div', { class: 'gm-search' }, input, results), buttons: [{ label: 'Anuluj', value: null }], onOpen: () => input.focus() }).then(() => resolve(null));
+        search();
       });
     }
 
-    async function settingsDialog(t) {
-      const nameI = h('input', { class: 'field', value: 'Mój ' + t.label, spellcheck: 'false' });
+    async function settingsDialog(t, prefill, titleName) {
+      if (!t) return WD.error(new Error('Nieznany typ serwera'));
+      const nameI = h('input', { class: 'field', value: titleName ? 'Mój ' + titleName : 'Mój ' + t.label, spellcheck: 'false' });
       const inputs = {};
       const fields = [h('label', {}, 'Nazwa serwera'), nameI];
       for (const f of t.settings) {
+        const pre = prefill && prefill[f.key] != null ? prefill[f.key] : (f.def != null ? f.def : '');
         let inp;
-        if (f.type === 'bool') { inp = h('input', { type: 'checkbox', checked: f.def !== false }); fields.push(h('label', { class: 'tm-radio' }, inp, ' ' + f.label)); }
-        else { inp = h('input', { class: 'field', type: f.type === 'number' ? 'number' : 'text', value: f.def != null ? f.def : '' }); fields.push(h('label', {}, f.label), inp); }
+        if (f.type === 'bool') { inp = h('input', { type: 'checkbox', checked: pre !== false && pre !== 'false' }); fields.push(h('label', { class: 'tm-radio' }, inp, ' ' + f.label)); }
+        else { inp = h('input', { class: 'field', type: f.type === 'number' ? 'number' : 'text', value: pre }); fields.push(h('label', {}, f.label), inp); }
         inputs[f.key] = inp;
       }
       if (t.steam) fields.push(h('p', { class: 'tm-dim', style: { marginTop: '10px' } }, STEAM_HINT));
       const v = await WD.dialog({
-        title: 'Nowy serwer: ' + t.label,
+        title: 'Nowy serwer: ' + (titleName || t.label),
         body: h('div', {}, ...fields),
         buttons: [{ label: 'Utwórz', value: 'ok', kind: 'primary' }, { label: 'Wstecz', value: 'back' }],
         onOpen: () => nameI.focus()

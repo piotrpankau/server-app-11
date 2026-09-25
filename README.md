@@ -40,14 +40,15 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
   - aktualizacja pakietów Ubuntu (apt) z widocznym logiem,
   - ponowne uruchomienie serwera.
 - **Ustawienia**: jasny lub ciemny motyw, tapeta, zmiana hasła.
-- Działa także na telefonie.
+- Działa także na telefonie: pełny pulpit z oknami, aplikacje otwierają się na cały ekran, większe przyciski, a powiadomienia nie zasłaniają ikon.
 
 - **Konta użytkowników** (aplikacja „Użytkownicy”, tylko administrator):
   - dodawanie kont z rolą **administrator** (pełny dostęp) lub **użytkownik** (widzi tylko „Serwery gier” i przypisane mu serwery – bez terminala, plików i ustawień systemu),
   - przypisywanie użytkownikom konkretnych serwerów gier, zmiana hasła i roli, usuwanie kont,
   - logowanie tą samą stroną, każdy swoim loginem i hasłem.
 - **Serwery gier** (aplikacja „Serwery gier”) – mały panel hostingowy dla Ciebie i znajomych:
-  - postawienie serwera kilkoma kliknięciami z gotowych szablonów: **Valheim**, **Counter-Strike 2**, **Minecraft (Java)**, dowolna inna gra ze **Steam** (podajesz AppID) albo własne polecenie startowe,
+  - **wyszukiwarka gier**: wpisujesz nazwę (np. „Rust”, „Palworld”, „ARK”), a panel sam podpowiada dane do instalacji – AppID serwera ze Steam, komendę startową i porty (z wbudowanego katalogu popularnych gier oraz podpowiedzi na żywo ze Steam),
+  - gotowe szablony: **Valheim**, **Counter-Strike 2**, **Minecraft (Java)**, dowolna inna gra ze **Steam** (podajesz AppID) albo własne polecenie startowe,
   - automatyczna instalacja plików gry (SteamCMD dla gier ze Steam, pobieranie server.jar dla Minecrafta) z widocznym postępem,
   - **konsola na żywo** każdego serwera (możesz wpisywać komendy), start / stop / restart, autostart po restarcie serwera,
   - edycja ustawień (nazwa, port, hasło, mapa, RAM itd.) i plików konfiguracyjnych,
