@@ -38,6 +38,7 @@
     window.addEventListener('drop', (e) => e.preventDefault());
 
     setTimeout(() => WD.backgroundUpdateCheck(), 4000);
+    setupLive();
 
     if (WD.settings.get('firstRun', true)) {
       WD.settings.set('firstRun', false);
@@ -219,6 +220,7 @@
       { name: 'Notatnik', icon: 'editor', open: () => WD.apps.editor.launch({}) },
       { name: 'Menedżer zadań', icon: 'monitor', open: () => WD.apps.monitor.launch() },
       { name: 'Ustawienia', icon: 'settings', open: () => WD.apps.settings.launch() },
+      { name: 'Sesje', icon: 'sessions', open: () => WD.apps.sessions.launch() },
       { name: 'Aktualizacje', icon: 'updates', open: () => WD.apps.updates.launch() },
       { name: 'Wyślij pliki', icon: 'upload', open: () => WD.pickAndUpload(WD.info.desktop, false) }
     ];
@@ -267,6 +269,70 @@
       try { await api.post('/api/logout'); } catch { /* ignore */ }
       location.href = '/login';
     });
+  }
+
+  // ---------- Live session features ----------
+  // Server-Sent Events: new logins elsewhere, remote logout, someone watching our terminal.
+  // The page also reports its open windows so other sessions can see what it is doing.
+  function setupLive() {
+    const tray = document.getElementById('sessions-tray');
+    tray.addEventListener('click', () => WD.apps.sessions.launch());
+    const refreshTray = async () => {
+      try {
+        const list = await api.get('/api/panel/sessions');
+        const others = list.filter((s) => s.online && !s.current);
+        tray.hidden = !others.length;
+        tray.querySelector('.count').textContent = String(others.length);
+        tray.title = others.length
+          ? 'Inne zalogowane teraz komputery:\n' + others.map((s) => `${s.label || s.browser + ' na ' + s.os} (${s.ip})`).join('\n')
+          : '';
+      } catch { /* ignore */ }
+    };
+    refreshTray();
+    setInterval(refreshTray, 20000);
+
+    let es = null;
+    const connect = () => {
+      es = new EventSource('/api/events');
+      es.addEventListener('login', (e) => {
+        const d = JSON.parse(e.data);
+        WD.toast(h('span', {}, `Nowe logowanie: ${d.browser} na ${d.os} (${d.ip}). `,
+          h('a', { href: '#', onclick: (ev) => { ev.preventDefault(); WD.apps.sessions.launch({ sid: d.sid }); } }, 'Pokaż sesje')), '', 10000);
+        setTimeout(refreshTray, 1500);
+      });
+      es.addEventListener('revoked', (e) => {
+        const d = JSON.parse(e.data);
+        es.close();
+        WD.alert('Wylogowano', `Ta sesja została wylogowana${d.reason ? ' (' + d.reason + ')' : ''}.`).then(() => { location.href = '/login'; });
+        setTimeout(() => { location.href = '/login'; }, 8000);
+      });
+      es.addEventListener('watched', (e) => {
+        const d = JSON.parse(e.data);
+        WD.toast(d.on ? `Sesja „${d.by}” ogląda na żywo Twój terminal` : `Sesja „${d.by}” zakończyła podgląd Twojego terminala`, d.on ? 'error' : '', 6000);
+      });
+      es.onerror = () => {
+        // Session expired or server restarting: EventSource reconnects by itself;
+        // make sure we are still logged in.
+        api.get('/api/info').catch(() => {});
+      };
+    };
+    connect();
+
+    let stateTimer = null;
+    const brave = navigator.brave && typeof navigator.brave.isBrave === 'function';
+    const report = () => {
+      clearTimeout(stateTimer);
+      stateTimer = setTimeout(() => {
+        const focused = WD.wm.focused();
+        api.post('/api/panel/state', {
+          browser: brave ? 'Brave' : undefined,
+          screen: `${window.screen.width}×${window.screen.height}`,
+          windows: WD.wm.windows.map((w) => ({ app: w.app, title: w.titleEl.textContent, focused: w === focused }))
+        }).catch(() => {});
+      }, 800);
+    };
+    WD.on('windows-changed', report);
+    report();
   }
 
   // ---------- Clock ----------

@@ -3,7 +3,56 @@
 (function (WD) {
   const { h } = WD;
 
+  const THEME = {
+    background: '#0c0c0c', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: '#264f78',
+    black: '#0c0c0c', red: '#c50f1f', green: '#13a10e', yellow: '#c19c00', blue: '#0037da', magenta: '#881798', cyan: '#3a96dd', white: '#cccccc',
+    brightBlack: '#767676', brightRed: '#e74856', brightGreen: '#16c60c', brightYellow: '#f9f1a5', brightBlue: '#3b78ff', brightMagenta: '#b4009e', brightCyan: '#61d6d6', brightWhite: '#f2f2f2'
+  };
+
+  // Read-only live view of a terminal that belongs to another session.
+  function watch(opts) {
+    const wrap = h('div', { class: 'term-wrap' });
+    const banner = h('div', { class: 'term-watch' }, 'Podgląd na żywo – tylko do odczytu');
+    const term = new window.Terminal({
+      fontFamily: '"Cascadia Mono", "Ubuntu Mono", Menlo, Consolas, monospace',
+      fontSize: WD.settings.get('term.fontSize', 14),
+      scrollback: 5000,
+      disableStdin: true,
+      cursorBlink: false,
+      theme: THEME
+    });
+    let ws = null;
+    const win = WD.wm.open({
+      app: 'terminal-watch',
+      title: 'Podgląd terminala' + (opts.title ? ` — ${opts.title}` : ''),
+      icon: WD.appIcon('terminal'),
+      width: 820,
+      height: 500,
+      onClose: () => { if (ws) ws.close(); term.dispose(); }
+    });
+    win.body.append(banner, wrap);
+    term.open(wrap);
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/terminal?watch=${encodeURIComponent(opts.watch)}`);
+    ws.onmessage = (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
+      if (m.t === 'init') {
+        term.resize(m.cols, m.rows);
+        term.write(m.data);
+        banner.textContent = `Podgląd na żywo terminala sesji: ${m.owner} – tylko do odczytu`;
+      } else if (m.t === 'o') term.write(m.d);
+      else if (m.t === 'size') term.resize(m.cols, m.rows);
+      else if (m.t === 'exit' || m.t === 'gone') {
+        term.write('\r\n\x1b[90m[Terminal został zamknięty]\x1b[0m\r\n');
+        banner.textContent = 'Terminal został zamknięty';
+      }
+    };
+    ws.onclose = () => { banner.classList.add('off'); };
+    return win;
+  }
+
   function launch(opts = {}) {
+    if (opts.watch) return watch(opts);
     const wrap = h('div', { class: 'term-wrap' });
     const status = h('div', { class: 'term-status', hidden: true });
     let ws = null;

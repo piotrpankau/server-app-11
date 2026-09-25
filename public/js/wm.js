@@ -86,6 +86,7 @@
       this.titleEl.textContent = title;
       this.taskBtn.title = title;
       this.taskBtn.querySelector('.t').textContent = title;
+      WD.emit('windows-changed');
     }
 
     setIcon(svg) {
@@ -106,6 +107,7 @@
       this.el.classList.add('focused');
       this.taskBtn.classList.add('focused', 'active');
       if (this.onFocus) this.onFocus();
+      WD.emit('windows-changed');
     }
 
     blur() {
@@ -160,6 +162,7 @@
       this.taskBtn.remove();
       windows.splice(windows.indexOf(this), 1);
       WD.emit('window-closed', this);
+      WD.emit('windows-changed');
       focusTopmost();
     }
 

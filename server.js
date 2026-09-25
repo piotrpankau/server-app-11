@@ -8,10 +8,11 @@ const express = require('express');
 
 const config = require('./lib/config');
 const auth = require('./lib/auth');
+const sessions = require('./lib/sessions');
 const taskmgr = require('./lib/taskmgr');
 const updates = require('./lib/updates');
 const { createFiles, HttpError } = require('./lib/files');
-const { attachTerminal } = require('./lib/terminal');
+const terminal = require('./lib/terminal');
 const assistant = require('./lib/assistant');
 
 const cfg = config.load();
@@ -54,21 +55,79 @@ app.post('/api/login', express.json({ limit: '10kb' }), (req, res) => {
     return res.status(401).json({ error: 'Nieprawidłowy login lub hasło' });
   }
   auth.clearFailures(ip);
-  console.log(`[login] zalogowano z ${ip}`);
-  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg), cfg.sessionHours * 3600));
+  const session = sessions.create(req, cfg.sessionHours);
+  console.log(`[login] zalogowano z ${ip} (${session.browser}, ${session.os})`);
+  sessions.log(session.sid, 'login', `Zalogowano z ${session.ip} (${session.browser} na ${session.os})`);
+  sessions.broadcast('login', { sid: session.sid, ip: session.ip, browser: session.browser, os: session.os }, session.sid);
+  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, session.sid), cfg.sessionHours * 3600));
   res.json({ ok: true });
 });
 
 app.post('/api/logout', (req, res) => {
+  const tok = auth.sessionFromRequest(cfg, req);
+  if (tok) {
+    sessions.log(tok.s, 'logout', 'Wylogowano');
+    sessions.revoke(tok.s, 'wylogowano');
+  }
   res.setHeader('Set-Cookie', auth.cookieHeader(cfg, '', 0));
   res.json({ ok: true });
 });
 
 // ---------- Everything below requires a session ----------
 app.use((req, res, next) => {
-  if (auth.sessionFromRequest(cfg, req)) return next();
+  const tok = auth.sessionFromRequest(cfg, req);
+  if (tok) {
+    req.sid = tok.s;
+    sessions.touch(tok.s, req);
+    return next();
+  }
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Sesja wygasła, zaloguj się ponownie' });
   return res.redirect('/login');
+});
+
+// ---------- Activity log: what each session does ----------
+const few = (paths) => {
+  const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
+  return list.slice(0, 5).join(', ') + (list.length > 5 ? ` i ${list.length - 5} innych` : '');
+};
+const ACTIVITY = {
+  'POST /api/write': ['file', (q) => `Zapisano plik ${q.body.path}`],
+  'POST /api/mkdir': ['file', (q) => `Utworzono folder ${q.body.path}`],
+  'POST /api/touch': ['file', (q) => `Utworzono plik ${q.body.path}`],
+  'POST /api/rename': ['file', (q) => `Zmieniono nazwę ${q.body.from} → ${path.basename(String(q.body.to))}`],
+  'POST /api/delete': ['delete', (q) => `Usunięto: ${few(q.body.paths)}`],
+  'POST /api/copy': ['file', (q) => `Skopiowano ${few(q.body.paths)} do ${q.body.dest}`],
+  'POST /api/move': ['file', (q) => `Przeniesiono ${few(q.body.paths)} do ${q.body.dest}`],
+  'POST /api/chmod': ['file', (q) => `Zmieniono uprawnienia ${q.body.path} na ${q.body.mode}`],
+  'POST /api/extract': ['file', (q) => `Wypakowano ${q.body.path}`],
+  'POST /api/compress': ['file', (q) => `Spakowano do ZIP: ${few(q.body.paths)}`],
+  'POST /api/upload': ['upload', (q) => `Wysłano plik ${q.query.path}`, (q) => ({ size: Number(q.headers['content-length']) || 0, dir: path.dirname(String(q.query.path)) })],
+  'GET /api/download': ['download', (q) => `Pobrano ${q.query.paths ? few(JSON.parse(q.query.paths)) : q.query.path}`],
+  'GET /api/read': ['file', (q) => `Otworzono w edytorze ${q.query.path}`],
+  'POST /api/kill': ['process', (q) => `${q.body.signal === 'SIGKILL' ? 'Wymuszono zakończenie' : q.body.signal === 'SIGSTOP' ? 'Wstrzymano' : q.body.signal === 'SIGCONT' ? 'Wznowiono' : 'Zakończono'}${q.body.tree ? ' drzewo procesów' : ' proces'} ${q.procName || ''} (PID ${q.body.pid})`],
+  'POST /api/renice': ['process', (q) => `Zmieniono priorytet ${q.procName || ''} (PID ${q.body.pid}) na nice ${q.body.nice}`],
+  'POST /api/run': ['command', (q) => `Uruchomiono zadanie w tle: ${q.body.command}`],
+  'POST /api/service': ['service', (q) => `Usługa ${q.body.name}: ${{ start: 'uruchomiono', stop: 'zatrzymano', restart: 'uruchomiono ponownie', enable: 'włączono autostart', disable: 'wyłączono autostart' }[q.body.action] || q.body.action}`],
+  'POST /api/update/app': ['system', () => 'Rozpoczęto aktualizację WebPulpit'],
+  'POST /api/update/system': ['system', () => 'Rozpoczęto aktualizację pakietów systemu'],
+  'POST /api/reboot': ['system', () => 'Uruchomiono ponownie serwer'],
+  'POST /api/password': ['security', () => 'Zmieniono hasło do panelu'],
+  'POST /api/assistant/settings': ['assistant', (q) => (typeof q.body.apiKey === 'string' ? (q.body.apiKey ? 'Zmieniono klucz API asystenta' : 'Usunięto klucz API asystenta') : 'Zmieniono ustawienia asystenta')],
+  'POST /api/assistant/conv/delete': ['assistant', () => 'Usunięto rozmowę z asystentem'],
+  'POST /api/panel/revoke': ['security', (q) => `Wylogowano sesję: ${q.revokedName || q.body.sid}`],
+  'POST /api/panel/revoke-others': ['security', (q) => `Wylogowano wszystkie inne sesje (${q.revokedCount || 0})`]
+};
+app.use('/api', (req, res, next) => {
+  const rule = ACTIVITY[`${req.method} ${req.baseUrl}${req.path}`];
+  if (!rule) return next();
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    try {
+      req.body = req.body || {};
+      sessions.log(req.sid, rule[0], rule[1](req), rule[2] ? rule[2](req) : undefined);
+    } catch { /* never break a request because of logging */ }
+  });
+  next();
 });
 
 // State-changing requests must carry a custom header, which a foreign site cannot add
@@ -208,14 +267,20 @@ function validPid(v) {
 }
 const SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGSTOP', 'SIGCONT', 'SIGHUP', 'SIGINT'];
 
+function procName(pid) {
+  try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return ''; }
+}
+
 app.post('/api/kill', json, wrap(async (req, res) => {
   const pid = validPid(req.body.pid);
+  req.procName = procName(pid);
   const signal = SIGNALS.includes(req.body.signal) ? req.body.signal : 'SIGTERM';
   if (req.body.tree) return res.json({ killed: taskmgr.killTree(pid, signal) });
   process.kill(pid, signal);
   res.json({ killed: 1 });
 }));
 app.post('/api/renice', json, wrap(async (req, res) => {
+  req.procName = procName(Number(req.body.pid));
   taskmgr.setPriority(validPid(req.body.pid), req.body.nice);
   res.json({ ok: true });
 }));
@@ -257,9 +322,66 @@ app.post('/api/password', json, wrap(async (req, res) => {
   const stored = JSON.parse(fs.readFileSync(config.CONFIG_PATH, 'utf8'));
   stored.passwordHash = cfg.passwordHash;
   config.save(stored);
-  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg), cfg.sessionHours * 3600));
+  // Tokens of other sessions no longer match the password - mark them as logged out too.
+  for (const s of sessions.list(req.sid)) if (s.active && !s.current) sessions.revoke(s.sid, 'zmiana hasła');
+  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, req.sid), cfg.sessionHours * 3600));
   res.json({ ok: true });
 }));
+
+// ---------- Panel sessions (logged-in computers) ----------
+app.get('/api/panel/sessions', (req, res) => {
+  const terms = terminal.list();
+  res.json(sessions.list(req.sid).map((s) => ({ ...s, terminals: terms.filter((t) => t.sid === s.sid) })));
+});
+app.get('/api/panel/activity', (req, res) => {
+  res.json(sessions.activity({
+    sid: req.query.sid || undefined,
+    before: Number(req.query.before) || undefined,
+    limit: Math.min(500, Number(req.query.limit) || 200),
+    type: req.query.type || undefined
+  }));
+});
+app.post('/api/panel/revoke', json, wrap(async (req, res) => {
+  const sid = String(req.body.sid || '');
+  req.revokedName = sessions.describe(sid);
+  if (!sessions.revoke(sid, 'wylogowano zdalnie z innej sesji')) throw new HttpError(404, 'Ta sesja jest już nieaktywna');
+  res.json({ ok: true });
+}));
+app.post('/api/panel/revoke-others', (req, res) => {
+  let n = 0;
+  for (const s of sessions.list(req.sid)) if (s.active && !s.current && sessions.revoke(s.sid, 'wylogowano zdalnie z innej sesji')) n++;
+  req.revokedCount = n;
+  res.json({ revoked: n });
+});
+app.post('/api/panel/label', json, (req, res) => {
+  sessions.setLabel(String(req.body.sid || ''), req.body.label);
+  res.json({ ok: true });
+});
+app.post('/api/panel/state', json, (req, res) => {
+  sessions.setState(req.sid, req.body || {});
+  res.json({ ok: true });
+});
+app.post('/api/panel/terminal/kill', json, (req, res) => {
+  const t = terminal.list().find((x) => x.id === req.body.id);
+  if (!t) throw new HttpError(404, 'Ten terminal jest już zamknięty');
+  terminal.kill(t.id);
+  sessions.log(req.sid, 'terminal', `Zamknięto terminal sesji ${sessions.describe(t.sid)}`);
+  res.json({ ok: true });
+});
+
+// Live notifications for the open page (Server-Sent Events).
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  res.write(`event: hello\ndata: ${JSON.stringify({ sid: req.sid })}\n\n`);
+  const remove = sessions.addStream(req.sid, res);
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => { clearInterval(ping); remove(); });
+});
 
 // ---------- Asystent Claude ----------
 app.get('/api/assistant/settings', (req, res) => res.json(assistant.publicSettings(cfg)));
@@ -320,7 +442,7 @@ if (cfg.https && cfg.https.cert && cfg.https.key) {
 server.requestTimeout = 0;
 server.headersTimeout = 60000;
 
-attachTerminal(server, cfg);
+terminal.attachTerminal(server, cfg);
 assistant.attachAssistant(server, cfg, files);
 
 server.listen(cfg.port, cfg.host, () => {

@@ -29,6 +29,12 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
   - polecenia i zapis plików wykonuje tylko **po Twojej zgodzie** (przyciski Zezwól / Odrzuć). W ustawieniach można to zmienić na „bez pytania” albo „tylko rozmowa”,
   - rozmowy zapisują się na serwerze, a polecenia z odpowiedzi uruchomisz jednym kliknięciem w terminalu,
   - potrzebny jest klucz API z [platform.claude.com](https://platform.claude.com/settings/keys), płatny za użycie, osobno od subskrypcji Claude. Z subskrypcją Pro/Max możesz zamiast tego kliknąć **„Otwórz Claude Code w terminalu”**.
+- **Sesje**, czyli kilka komputerów na jednym koncie:
+  - lista zalogowanych urządzeń z IP, przeglądarką, systemem, czasem logowania i statusem online. Urządzenia można nazwać, np. „Laptop w domu”,
+  - co każda sesja **ma teraz otwarte** (okna) i jej **dziennik aktywności**: operacje na plikach, wysyłanie i pobieranie, polecenia wpisane w terminalu (hasła są ukrywane), procesy, usługi, aktualizacje, pytania do asystenta,
+  - **podgląd na żywo** terminala innej sesji, tylko do odczytu. Osoba oglądana dostaje powiadomienie,
+  - **wylogowanie wybranej sesji** albo wszystkich innych naraz. Tamta strona od razu przechodzi do ekranu logowania, a jej terminale są zamykane,
+  - powiadomienie o każdym nowym logowaniu i licznik innych zalogowanych komputerów na pasku zadań.
 - **Aktualizacje** z przyciskami „Sprawdź aktualizacje” i „Aktualizuj”:
   - aktualizacja samego WebPulpitu z GitHuba (panel restartuje się sam, a strona sama się odświeża),
   - aktualizacja pakietów Ubuntu (apt) z widocznym logiem,
