@@ -24,6 +24,11 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
   - **Usługi** (systemd): uruchom, zatrzymaj, uruchom ponownie, logi,
   - **Autostart**: włączanie i wyłączanie usług startujących razem z serwerem,
   - **Uruchom nowe zadanie** oraz szybkość odświeżania do wyboru.
+- **Asystent Claude**, czyli czat z Claude wbudowany w panel:
+  - pytasz po polsku, a Claude sam sprawdza stan serwera (dyski, procesy, logi, pliki konfiguracyjne) i odpowiada,
+  - polecenia i zapis plików wykonuje tylko **po Twojej zgodzie** (przyciski Zezwól / Odrzuć). W ustawieniach można to zmienić na „bez pytania” albo „tylko rozmowa”,
+  - rozmowy zapisują się na serwerze, a polecenia z odpowiedzi uruchomisz jednym kliknięciem w terminalu,
+  - potrzebny jest klucz API z [platform.claude.com](https://platform.claude.com/settings/keys), płatny za użycie, osobno od subskrypcji Claude. Z subskrypcją Pro/Max możesz zamiast tego kliknąć **„Otwórz Claude Code w terminalu”**.
 - **Aktualizacje** z przyciskami „Sprawdź aktualizacje” i „Aktualizuj”:
   - aktualizacja samego WebPulpitu z GitHuba (panel restartuje się sam, a strona sama się odświeża),
   - aktualizacja pakietów Ubuntu (apt) z widocznym logiem,

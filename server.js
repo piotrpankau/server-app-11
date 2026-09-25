@@ -12,6 +12,7 @@ const taskmgr = require('./lib/taskmgr');
 const updates = require('./lib/updates');
 const { createFiles, HttpError } = require('./lib/files');
 const { attachTerminal } = require('./lib/terminal');
+const assistant = require('./lib/assistant');
 
 const cfg = config.load();
 if (!cfg.username || !cfg.passwordHash || !cfg.sessionSecret) {
@@ -260,6 +261,25 @@ app.post('/api/password', json, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- Asystent Claude ----------
+app.get('/api/assistant/settings', (req, res) => res.json(assistant.publicSettings(cfg)));
+app.post('/api/assistant/settings', json, wrap(async (req, res) => res.json(assistant.saveSettings(cfg, req.body || {}))));
+app.get('/api/assistant/convs', (req, res) => res.json(assistant.listConvs()));
+app.get('/api/assistant/conv', wrap(async (req, res) => {
+  const conv = assistant.loadConv(req.query.id);
+  if (!conv) throw new HttpError(404, 'Nie ma takiej rozmowy');
+  res.json(conv);
+}));
+app.post('/api/assistant/conv/delete', json, wrap(async (req, res) => {
+  assistant.deleteConv(req.body.id);
+  res.json({ ok: true });
+}));
+app.get('/api/assistant/claude-code', (req, res) => {
+  require('child_process').execFile('/bin/bash', ['-lc', 'command -v claude'], (err, stdout) => {
+    res.json({ installed: !err && !!stdout.trim(), path: stdout.trim() });
+  });
+});
+
 app.use('/api', (req, res) => res.status(404).json({ error: 'Nie znaleziono' }));
 
 // Error handler: map filesystem errors to readable Polish messages.
@@ -301,6 +321,7 @@ server.requestTimeout = 0;
 server.headersTimeout = 60000;
 
 attachTerminal(server, cfg);
+assistant.attachAssistant(server, cfg, files);
 
 server.listen(cfg.port, cfg.host, () => {
   const proto = cfg.https ? 'https' : 'http';
