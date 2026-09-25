@@ -88,7 +88,16 @@
       const q = new URLSearchParams({ cols: term.cols, rows: term.rows });
       if (opts.cwd) q.set('cwd', opts.cwd);
       ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/terminal?${q}`);
-      ws.onopen = () => { doFit(); term.focus(); };
+      ws.onopen = () => {
+        doFit();
+        term.focus();
+        // Optional command to run right after the shell starts ("Run new task").
+        if (opts.command) {
+          const cmd = opts.command;
+          opts.command = null;
+          setTimeout(() => send({ t: 'i', d: cmd + '\r' }), 300);
+        }
+      };
       ws.onmessage = (e) => term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
       ws.onclose = (e) => {
         if (closed) return;

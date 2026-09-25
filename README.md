@@ -16,7 +16,18 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
 - **Terminal** (bash) z kolorami. `Ctrl+C` kopiuje zaznaczony tekst, `Ctrl+V` wkleja.
 - **Notatnik** do edycji plików tekstowych i konfiguracji (`Ctrl+S` zapisuje).
 - **Podgląd** zdjęć (strzałkami przechodzisz do następnego), filmów, muzyki i PDF.
-- **Monitor systemu** pokazuje procesor, RAM, dyski, sieć i listę procesów z przyciskiem „Zakończ”.
+- **Menedżer zadań** wzorowany na tym z Windows:
+  - **Procesy**, grupowane po nazwie, z podświetleniem obciążenia oraz sumą procesora, pamięci i dysku w nagłówku. Pod prawym przyciskiem: zakończ, wymuś zakończenie, zakończ drzewo procesów, wstrzymaj/wznów, ustaw priorytet, otwórz lokalizację pliku, właściwości,
+  - **Wydajność** z wykresami z ostatnich 60 sekund: procesor (ogólnie i każdy rdzeń), pamięć (ze strukturą), każdy dysk (czas aktywności, odczyt, zapis) i każda karta sieciowa,
+  - **Użytkownicy**, czyli kto jest zalogowany i ile zużywa,
+  - **Szczegóły** z pełną listą procesów (PID, czas procesora, wątki, priorytet, wiersz polecenia),
+  - **Usługi** (systemd): uruchom, zatrzymaj, uruchom ponownie, logi,
+  - **Autostart**: włączanie i wyłączanie usług startujących razem z serwerem,
+  - **Uruchom nowe zadanie** oraz szybkość odświeżania do wyboru.
+- **Aktualizacje** z przyciskami „Sprawdź aktualizacje” i „Aktualizuj”:
+  - aktualizacja samego WebPulpitu z GitHuba (panel restartuje się sam, a strona sama się odświeża),
+  - aktualizacja pakietów Ubuntu (apt) z widocznym logiem,
+  - ponowne uruchomienie serwera.
 - **Ustawienia**: jasny lub ciemny motyw, tapeta, zmiana hasła.
 - Działa także na telefonie.
 
@@ -71,7 +82,7 @@ Wejdź na podany adres w Brave. Pojawi się ostrzeżenie o certyfikacie, bo cert
 | Logi na żywo | `journalctl -u webpulpit -f` |
 | Restart | `systemctl restart webpulpit` |
 | Zmiana loginu i hasła | `sudo bash /opt/webpulpit/install.sh --reset-password` |
-| Aktualizacja | `cd ~/webpulpit && git pull && sudo bash install.sh` |
+| Aktualizacja | w panelu: **Start → Aktualizacje → Aktualizuj**, albo ręcznie `cd ~/webpulpit && git pull && sudo bash install.sh` |
 | Odinstalowanie | `sudo bash /opt/webpulpit/install.sh --uninstall` |
 
 Aplikacja instaluje się do `/opt/webpulpit` i startuje sama po restarcie serwera (usługa systemd `webpulpit`). Konfiguracja jest w `/opt/webpulpit/config.json`.

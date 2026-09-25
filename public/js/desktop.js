@@ -7,7 +7,7 @@
     { name: 'Ten komputer', icon: 'computer', open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }), dir: WD.info.root || '/' },
     { name: 'Folder domowy', icon: 'home', open: () => WD.apps.explorer.launch({ path: WD.info.home }), dir: WD.info.home },
     { name: 'Terminal', icon: 'terminal', open: () => WD.apps.terminal.launch({}) },
-    { name: 'Monitor systemu', icon: 'monitor', open: () => WD.apps.monitor.launch() },
+    { name: 'Menedżer zadań', icon: 'monitor', open: () => WD.apps.monitor.launch() },
     { name: 'Notatnik', icon: 'editor', open: () => WD.apps.editor.launch({}) },
     { name: 'Ustawienia', icon: 'settings', open: () => WD.apps.settings.launch() }
   ];
@@ -35,6 +35,8 @@
     // Never let the browser open a file dropped outside a drop zone.
     window.addEventListener('dragover', (e) => e.preventDefault());
     window.addEventListener('drop', (e) => e.preventDefault());
+
+    setTimeout(() => WD.backgroundUpdateCheck(), 4000);
 
     if (WD.settings.get('firstRun', true)) {
       WD.settings.set('firstRun', false);
@@ -213,8 +215,9 @@
       { name: 'Pulpit', icon: 'desktopfolder', open: () => WD.apps.explorer.launch({ path: WD.info.desktop }) },
       { name: 'Terminal', icon: 'terminal', open: () => WD.apps.terminal.launch({}) },
       { name: 'Notatnik', icon: 'editor', open: () => WD.apps.editor.launch({}) },
-      { name: 'Monitor systemu', icon: 'monitor', open: () => WD.apps.monitor.launch() },
+      { name: 'Menedżer zadań', icon: 'monitor', open: () => WD.apps.monitor.launch() },
       { name: 'Ustawienia', icon: 'settings', open: () => WD.apps.settings.launch() },
+      { name: 'Aktualizacje', icon: 'updates', open: () => WD.apps.updates.launch() },
       { name: 'Wyślij pliki', icon: 'upload', open: () => WD.pickAndUpload(WD.info.desktop, false) }
     ];
   }

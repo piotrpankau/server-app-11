@@ -84,7 +84,7 @@ window.WD = window.WD || {};
       const u = ['B', 'KB', 'MB', 'GB', 'TB'];
       let i = 0;
       while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-      return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + ' ' + u[i];
+      return (i === 0 ? String(n) : n.toFixed(n < 10 ? 1 : 0).replace('.', ',')) + ' ' + u[i];
     },
     date(ms) {
       if (!ms) return '';

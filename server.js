@@ -8,7 +8,8 @@ const express = require('express');
 
 const config = require('./lib/config');
 const auth = require('./lib/auth');
-const system = require('./lib/system');
+const taskmgr = require('./lib/taskmgr');
+const updates = require('./lib/updates');
 const { createFiles, HttpError } = require('./lib/files');
 const { attachTerminal } = require('./lib/terminal');
 
@@ -95,7 +96,8 @@ app.get('/api/info', (req, res) => {
     home,
     desktop,
     root: files.root,
-    hostname: os.hostname()
+    hostname: os.hostname(),
+    version: updates.versionInfo().version
   });
 });
 
@@ -193,13 +195,56 @@ app.post('/api/upload', wrap(async (req, res) => {
   res.json({ path: target });
 }));
 
-app.get('/api/system', wrap(async (req, res) => res.json(await system.stats())));
-app.get('/api/processes', wrap(async (req, res) => res.json(await system.processes())));
+// ---------- Task Manager ----------
+app.get('/api/perf', wrap(async (req, res) => res.json(await taskmgr.perf())));
+app.get('/api/procs', wrap(async (req, res) => res.json(taskmgr.processes())));
+app.get('/api/proc', wrap(async (req, res) => res.json(taskmgr.processDetail(req.query.pid))));
+
+function validPid(v) {
+  const pid = Number(v);
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) throw new HttpError(400, 'Nieprawidłowy PID (nie można zakończyć samego panelu)');
+  return pid;
+}
+const SIGNALS = ['SIGTERM', 'SIGKILL', 'SIGSTOP', 'SIGCONT', 'SIGHUP', 'SIGINT'];
+
 app.post('/api/kill', json, wrap(async (req, res) => {
-  const pid = Number(req.body.pid);
-  const signal = req.body.signal === 'SIGKILL' ? 'SIGKILL' : 'SIGTERM';
-  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) throw new HttpError(400, 'Nieprawidłowy PID');
+  const pid = validPid(req.body.pid);
+  const signal = SIGNALS.includes(req.body.signal) ? req.body.signal : 'SIGTERM';
+  if (req.body.tree) return res.json({ killed: taskmgr.killTree(pid, signal) });
   process.kill(pid, signal);
+  res.json({ killed: 1 });
+}));
+app.post('/api/renice', json, wrap(async (req, res) => {
+  taskmgr.setPriority(validPid(req.body.pid), req.body.nice);
+  res.json({ ok: true });
+}));
+app.post('/api/run', json, wrap(async (req, res) => {
+  const command = String(req.body.command || '').trim();
+  if (!command) throw new HttpError(400, 'Wpisz polecenie');
+  res.json({ pid: taskmgr.runTask(command, req.body.cwd) });
+}));
+app.get('/api/services', wrap(async (req, res) => res.json(await taskmgr.services())));
+app.post('/api/service', json, wrap(async (req, res) => {
+  await taskmgr.serviceAction(String(req.body.name || ''), String(req.body.action || ''));
+  res.json({ ok: true });
+}));
+app.get('/api/service-logs', wrap(async (req, res) => {
+  res.type('text/plain; charset=utf-8').send(await taskmgr.serviceLogs(String(req.query.name || '')));
+}));
+app.get('/api/sessions', wrap(async (req, res) => res.json(await taskmgr.sessions())));
+
+// ---------- Updates ----------
+app.get('/api/version', (req, res) => res.json({ ...updates.versionInfo(), root: updates.isRoot() }));
+app.get('/api/update/app', wrap(async (req, res) => res.json(await updates.checkApp(cfg))));
+app.post('/api/update/app', wrap(async (req, res) => res.json(await updates.updateApp(cfg))));
+app.get('/api/update/system', wrap(async (req, res) => res.json(await updates.checkSystem())));
+app.post('/api/update/system', wrap(async (req, res) => res.json(await updates.upgradeSystem())));
+app.get('/api/update/job', (req, res) => {
+  const name = req.query.name === 'system' ? 'system' : 'app';
+  res.json(updates.jobStatus(name));
+});
+app.post('/api/reboot', wrap(async (req, res) => {
+  await updates.reboot();
   res.json({ ok: true });
 }));
 

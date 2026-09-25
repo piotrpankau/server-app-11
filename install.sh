@@ -47,7 +47,7 @@ if [ "$MODE" = install ]; then
     grep -E '^(E|W):' /tmp/webpulpit-apt.log | sed 's/^/    /' || true
     warn "Kontynuuję instalację. Aby naprawić, usuń to repozytorium z /etc/apt/sources.list.d/"
   fi
-  apt-get install -y ca-certificates curl openssl unzip zip tar build-essential python3 >/dev/null \
+  apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 >/dev/null \
     || die "Nie udało się zainstalować pakietów. Napraw repozytoria apt (patrz komunikaty wyżej) i uruchom ponownie."
 
   NODE_MAJOR=0
@@ -144,6 +144,20 @@ if [ "$HTTPS_ON" = 1 ] && [ ! -f "$APP_DIR/certs/cert.pem" ]; then
     -subj "/CN=WebPulpit $PUBLIC_IP" \
     -addext "subjectAltName=IP:$PUBLIC_IP,DNS:$(hostname),DNS:localhost" >/dev/null 2>&1
   chmod 600 "$APP_DIR/certs/key.pem"
+fi
+
+# Remember where the git checkout is and which commit is installed, so the panel
+# can check for and install updates by itself (Aktualizacje).
+if [ "$MODE" = install ] && [ -d "$SRC_DIR/.git" ] && command -v git >/dev/null 2>&1; then
+  GIT="git -c safe.directory=* -C $SRC_DIR"
+  COMMIT="$($GIT rev-parse HEAD 2>/dev/null || true)"
+  BRANCH="$($GIT rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  printf '{"commit":"%s","branch":"%s","date":"%s"}\n' "$COMMIT" "$BRANCH" "$(date -Iseconds)" > "$APP_DIR/version.json"
+  node -e '
+    const fs = require("fs"); const f = process.argv[1];
+    const c = JSON.parse(fs.readFileSync(f, "utf8")); c.sourceDir = process.argv[2];
+    fs.writeFileSync(f, JSON.stringify(c, null, 2), { mode: 0o600 });
+  ' "$CONFIG" "$SRC_DIR"
 fi
 
 RUN_GROUP="$(id -gn "$RUN_AS")"

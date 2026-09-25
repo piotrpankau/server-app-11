@@ -77,13 +77,16 @@
       walls,
       h('h3', {}, 'Hasło do panelu'),
       h('div', { class: 'pw-form' }, oldPw, newPw, newPw2, pwBtn),
+      h('h3', {}, 'Aktualizacje'),
+      h('div', { class: 'upd-row' }, h('span', { class: 'grow about' }, 'Aktualizacje WebPulpit (z GitHuba) i systemu Ubuntu.'),
+        h('button', { class: 'btn primary', onclick: () => WD.apps.updates.launch() }, 'Otwórz Aktualizacje')),
       h('h3', {}, 'Informacje'),
       h('div', { class: 'about' },
         h('div', {}, `Serwer: ${info.hostname}`),
         h('div', {}, `Zalogowano jako: ${info.username}`),
         h('div', {}, `Pliki i terminal działają jako użytkownik systemowy: ${info.systemUser}`),
         h('div', {}, `Folder domowy: ${info.home}`),
-        h('div', {}, 'WebPulpit 1.0'))
+        h('div', {}, 'WebPulpit ' + (WD.info.version || '')))
     );
 
     const win = WD.wm.open({ app: 'settings', title: 'Ustawienia', icon: WD.appIcon('settings'), width: 560, height: 600 });
