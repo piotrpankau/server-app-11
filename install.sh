@@ -40,8 +40,15 @@ fi
 if [ "$MODE" = install ]; then
   say "Instaluję wymagane pakiety (może chwilę potrwać)…"
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y >/dev/null
-  apt-get install -y ca-certificates curl openssl unzip zip tar build-essential python3 >/dev/null
+  # A single broken third-party repository (e.g. an old Steam or PPA entry) makes
+  # "apt-get update" fail. That should not stop the installation.
+  if ! apt-get update -y >/dev/null 2>/tmp/webpulpit-apt.log; then
+    warn "apt-get update zgłosił błędy (zwykle przez stare/zepsute repozytorium):"
+    grep -E '^(E|W):' /tmp/webpulpit-apt.log | sed 's/^/    /' || true
+    warn "Kontynuuję instalację. Aby naprawić, usuń to repozytorium z /etc/apt/sources.list.d/"
+  fi
+  apt-get install -y ca-certificates curl openssl unzip zip tar build-essential python3 >/dev/null \
+    || die "Nie udało się zainstalować pakietów. Napraw repozytoria apt (patrz komunikaty wyżej) i uruchom ponownie."
 
   NODE_MAJOR=0
   if command -v node >/dev/null 2>&1; then
@@ -49,8 +56,11 @@ if [ "$MODE" = install ]; then
   fi
   if [ "$NODE_MAJOR" -lt 18 ]; then
     say "Instaluję Node.js 22 (NodeSource)…"
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
-    apt-get install -y nodejs >/dev/null
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1 \
+      || warn "Skrypt NodeSource zgłosił błąd (pewnie przez to samo repozytorium) – próbuję dalej."
+    apt-get install -y nodejs >/dev/null || die "Nie udało się zainstalować Node.js."
+    NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+    [ "$NODE_MAJOR" -ge 18 ] || die "Zainstalowany Node.js jest za stary ($(node -v 2>/dev/null)). Napraw repozytoria apt i uruchom ponownie."
   fi
   say "Node.js $(node -v)"
 
