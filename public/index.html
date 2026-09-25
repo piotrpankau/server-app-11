@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>WebPulpit</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/vendor/xterm/css/xterm.css">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="desktop">
+    <div id="desktop-icons"></div>
+  </div>
+
+  <div id="taskbar">
+    <button class="tb-btn" id="start-btn" title="Start"><span class="ico" data-icon="start"></span></button>
+    <div id="tasks"></div>
+    <div id="tray">
+      <button class="tb-btn" id="upload-tray" title="Wysyłanie plików" hidden><span class="ico" data-icon="upload"></span><span class="count"></span></button>
+      <button class="tb-btn" id="clock" title=""><span class="time"></span><span class="date"></span></button>
+    </div>
+  </div>
+
+  <div id="start-menu" hidden>
+    <input id="start-search" placeholder="Wyszukaj aplikacje…" autocomplete="off">
+    <div class="start-section">Aplikacje</div>
+    <div id="start-apps"></div>
+    <div class="start-footer">
+      <div class="start-user"><div class="avatar" id="start-avatar"></div><span id="start-username"></span></div>
+      <button class="tbtn" id="logout-btn" title="Wyloguj"><span data-icon="power"></span>Wyloguj</button>
+    </div>
+  </div>
+
+  <div id="upload-panel" hidden>
+    <header><span id="upload-title">Wysyłanie</span>
+      <button class="tbtn" id="upload-clear" title="Wyczyść zakończone">Wyczyść</button>
+      <button class="tbtn" id="upload-close" title="Zamknij"><span data-icon="close"></span></button>
+    </header>
+    <div id="upload-list"></div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="/vendor/xterm/lib/xterm.js"></script>
+  <script src="/vendor/xterm-fit/lib/addon-fit.js"></script>
+  <script src="/js/core.js"></script>
+  <script src="/js/icons.js"></script>
+  <script src="/js/wm.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/uploads.js"></script>
+  <script src="/js/apps/explorer.js"></script>
+  <script src="/js/apps/terminal.js"></script>
+  <script src="/js/apps/editor.js"></script>
+  <script src="/js/apps/viewer.js"></script>
+  <script src="/js/apps/monitor.js"></script>
+  <script src="/js/apps/settings.js"></script>
+  <script src="/js/desktop.js"></script>
+</body>
+</html>

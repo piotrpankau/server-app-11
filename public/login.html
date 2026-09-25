@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebPulpit – logowanie</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="login-page">
+  <form class="login-card" id="form" autocomplete="on">
+    <div class="login-avatar">
+      <svg viewBox="0 0 24 24" width="56" height="56"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path d="M3.5 21c.8-4.4 4.3-7 8.5-7s7.7 2.6 8.5 7" fill="currentColor"/></svg>
+    </div>
+    <h1>WebPulpit</h1>
+    <p class="login-sub" id="host">Zaloguj się do serwera</p>
+    <input name="username" id="username" placeholder="Login" autocomplete="username" required autofocus>
+    <input name="password" id="password" type="password" placeholder="Hasło" autocomplete="current-password" required>
+    <button type="submit" id="submit">Zaloguj</button>
+    <p class="login-error" id="error" role="alert"></p>
+  </form>
+<script>
+document.getElementById('host').textContent = 'Zaloguj się do ' + location.hostname;
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('error');
+  const btn = document.getElementById('submit');
+  err.textContent = '';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Błąd logowania');
+    location.href = '/';
+  } catch (ex) {
+    err.textContent = ex.message;
+    document.getElementById('password').select();
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

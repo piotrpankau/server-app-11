@@ -1,0 +1,23 @@
+{
+  "name": "webpulpit",
+  "version": "1.0.0",
+  "description": "Pulpit w stylu Windows w przeglądarce dla serwera Ubuntu: pliki, przeciąganie, terminal, monitor systemu.",
+  "main": "server.js",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "setup": "node scripts/setup.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "archiver": "^7.0.1",
+    "express": "^4.21.2",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  }
+}
