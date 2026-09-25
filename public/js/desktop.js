@@ -3,15 +3,18 @@
 (function (WD) {
   const { h, api, path: P } = WD;
 
-  const shortcuts = () => [
-    { name: 'Ten komputer', icon: 'computer', open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }), dir: WD.info.root || '/' },
-    { name: 'Folder domowy', icon: 'home', open: () => WD.apps.explorer.launch({ path: WD.info.home }), dir: WD.info.home },
-    { name: 'Terminal', icon: 'terminal', open: () => WD.apps.terminal.launch({}) },
-    { name: 'Asystent Claude', icon: 'assistant', open: () => WD.apps.assistant.launch() },
-    { name: 'Menedżer zadań', icon: 'monitor', open: () => WD.apps.monitor.launch() },
-    { name: 'Notatnik', icon: 'editor', open: () => WD.apps.editor.launch({}) },
+  const isAdmin = () => WD.info && WD.info.role === 'admin';
+  const shortcuts = () => ([
+    { name: 'Serwery gier', icon: 'games', open: () => WD.apps.games.launch() },
+    { name: 'Ten komputer', icon: 'computer', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }), dir: WD.info.root || '/' },
+    { name: 'Folder domowy', icon: 'home', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.home }), dir: WD.info.home },
+    { name: 'Terminal', icon: 'terminal', admin: true, open: () => WD.apps.terminal.launch({}) },
+    { name: 'Asystent Claude', icon: 'assistant', admin: true, open: () => WD.apps.assistant.launch() },
+    { name: 'Menedżer zadań', icon: 'monitor', admin: true, open: () => WD.apps.monitor.launch() },
+    { name: 'Notatnik', icon: 'editor', admin: true, open: () => WD.apps.editor.launch({}) },
+    { name: 'Użytkownicy', icon: 'people', admin: true, open: () => WD.apps.users.launch() },
     { name: 'Ustawienia', icon: 'settings', open: () => WD.apps.settings.launch() }
-  ];
+  ]).filter((s) => !s.admin || isAdmin());
 
   let deskEntries = [];
   let selected = new Set();
@@ -29,20 +32,27 @@
     setupStart();
     setupClock();
     setupDesktop();
-    await loadDesktop();
-    WD.on('fs-changed', (dirs) => { if (dirs.has(WD.info.desktop)) loadDesktop(); });
-    WD.on('clipboard', renderDesktop);
+    if (isAdmin()) {
+      await loadDesktop();
+      WD.on('fs-changed', (dirs) => { if (dirs.has(WD.info.desktop)) loadDesktop(); });
+      WD.on('clipboard', renderDesktop);
+      setTimeout(() => WD.backgroundUpdateCheck(), 4000);
+    } else {
+      renderDesktop();
+    }
 
     // Never let the browser open a file dropped outside a drop zone.
     window.addEventListener('dragover', (e) => e.preventDefault());
     window.addEventListener('drop', (e) => e.preventDefault());
 
-    setTimeout(() => WD.backgroundUpdateCheck(), 4000);
     setupLive();
 
-    if (WD.settings.get('firstRun', true)) {
+    if (isAdmin() && WD.settings.get('firstRun', true)) {
       WD.settings.set('firstRun', false);
       WD.toast('Witaj! Przeciągnij pliki z komputera na pulpit albo do okna Eksploratora, aby je wysłać na serwer.', '', 8000);
+    } else if (!isAdmin() && WD.settings.get('firstRunUser', true)) {
+      WD.settings.set('firstRunUser', false);
+      WD.toast('Witaj! Otwórz „Serwery gier”, aby zarządzać swoimi serwerami.', '', 8000);
     }
   }
 
@@ -161,6 +171,12 @@
     desk.addEventListener('contextmenu', (e) => {
       if (!onBackground(e)) return;
       e.preventDefault();
+      if (!isAdmin()) {
+        return WD.contextMenu(e.clientX, e.clientY, [
+          { label: 'Serwery gier', icon: 'games', action: () => WD.apps.games.launch() },
+          { label: 'Ustawienia (tapeta, motyw)', icon: 'info', action: () => WD.apps.settings.launch() }
+        ]);
+      }
       WD.contextMenu(e.clientX, e.clientY, WD.fileOps.backgroundMenu(WD.info.desktop, [
         { label: 'Odśwież', icon: 'refresh', action: loadDesktop },
         { label: 'Otwórz folder Pulpit', icon: 'open', action: () => WD.apps.explorer.launch({ path: WD.info.desktop }) },
@@ -212,18 +228,20 @@
   // ---------- Start menu ----------
   function startApps() {
     return [
-      { name: 'Eksplorator plików', icon: 'home', open: () => WD.apps.explorer.launch({ path: WD.info.home }) },
-      { name: 'Ten komputer', icon: 'computer', open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }) },
-      { name: 'Pulpit', icon: 'desktopfolder', open: () => WD.apps.explorer.launch({ path: WD.info.desktop }) },
-      { name: 'Terminal', icon: 'terminal', open: () => WD.apps.terminal.launch({}) },
-      { name: 'Asystent Claude', icon: 'assistant', open: () => WD.apps.assistant.launch() },
-      { name: 'Notatnik', icon: 'editor', open: () => WD.apps.editor.launch({}) },
-      { name: 'Menedżer zadań', icon: 'monitor', open: () => WD.apps.monitor.launch() },
+      { name: 'Serwery gier', icon: 'games', open: () => WD.apps.games.launch() },
+      { name: 'Eksplorator plików', icon: 'home', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.home }) },
+      { name: 'Ten komputer', icon: 'computer', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }) },
+      { name: 'Pulpit', icon: 'desktopfolder', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.desktop }) },
+      { name: 'Terminal', icon: 'terminal', admin: true, open: () => WD.apps.terminal.launch({}) },
+      { name: 'Asystent Claude', icon: 'assistant', admin: true, open: () => WD.apps.assistant.launch() },
+      { name: 'Notatnik', icon: 'editor', admin: true, open: () => WD.apps.editor.launch({}) },
+      { name: 'Menedżer zadań', icon: 'monitor', admin: true, open: () => WD.apps.monitor.launch() },
+      { name: 'Użytkownicy', icon: 'people', admin: true, open: () => WD.apps.users.launch() },
+      { name: 'Sesje', icon: 'sessions', admin: true, open: () => WD.apps.sessions.launch() },
+      { name: 'Aktualizacje', icon: 'updates', admin: true, open: () => WD.apps.updates.launch() },
       { name: 'Ustawienia', icon: 'settings', open: () => WD.apps.settings.launch() },
-      { name: 'Sesje', icon: 'sessions', open: () => WD.apps.sessions.launch() },
-      { name: 'Aktualizacje', icon: 'updates', open: () => WD.apps.updates.launch() },
-      { name: 'Wyślij pliki', icon: 'upload', open: () => WD.pickAndUpload(WD.info.desktop, false) }
-    ];
+      { name: 'Wyślij pliki', icon: 'upload', admin: true, open: () => WD.pickAndUpload(WD.info.desktop, false) }
+    ].filter((a) => !a.admin || isAdmin());
   }
 
   function closeStart() {
@@ -276,6 +294,7 @@
   // The page also reports its open windows so other sessions can see what it is doing.
   function setupLive() {
     const tray = document.getElementById('sessions-tray');
+    if (!isAdmin()) { setupSseOnly(); return; } // regular users: only logout notices, no session panel
     tray.addEventListener('click', () => WD.apps.sessions.launch());
     const refreshTray = async () => {
       try {
@@ -333,6 +352,18 @@
     };
     WD.on('windows-changed', report);
     report();
+  }
+
+  // Non-admin users: only listen for "you were logged out" / session events, no polling.
+  function setupSseOnly() {
+    const es = new EventSource('/api/events');
+    es.addEventListener('revoked', (e) => {
+      let d = {}; try { d = JSON.parse(e.data); } catch { /* ignore */ }
+      es.close();
+      WD.alert('Wylogowano', `Ta sesja została wylogowana${d.reason ? ' (' + d.reason + ')' : ''}.`).then(() => { location.href = '/login'; });
+      setTimeout(() => { location.href = '/login'; }, 8000);
+    });
+    es.onerror = () => { api.get('/api/info').catch(() => {}); };
   }
 
   // ---------- Clock ----------

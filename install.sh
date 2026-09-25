@@ -47,7 +47,10 @@ if [ "$MODE" = install ]; then
     grep -E '^(E|W):' /tmp/webpulpit-apt.log | sed 's/^/    /' || true
     warn "Kontynuuję instalację. Aby naprawić, usuń to repozytorium z /etc/apt/sources.list.d/"
   fi
-  apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 >/dev/null \
+  # tmux + Java run game servers; lib32gcc is needed by SteamCMD on 64-bit systems.
+  dpkg --add-architecture i386 >/dev/null 2>&1 || true
+  apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 tmux default-jre-headless lib32gcc-s1 >/dev/null 2>&1 \
+    || apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 tmux >/dev/null \
     || die "Nie udało się zainstalować pakietów. Napraw repozytoria apt (patrz komunikaty wyżej) i uruchom ponownie."
 
   NODE_MAJOR=0
@@ -164,6 +167,11 @@ RUN_GROUP="$(id -gn "$RUN_AS")"
 chown "$RUN_AS:$RUN_GROUP" "$CONFIG"
 chmod 600 "$CONFIG"
 [ -d "$APP_DIR/certs" ] && chown -R "$RUN_AS:$RUN_GROUP" "$APP_DIR/certs"
+[ -d "$APP_DIR/data" ] && chown -R "$RUN_AS:$RUN_GROUP" "$APP_DIR/data"
+# Folder for game servers (downloads, worlds, backups).
+GAMES_DIR="${WP_GAMES_DIR:-/opt/webpulpit-games}"
+mkdir -p "$GAMES_DIR"
+chown -R "$RUN_AS:$RUN_GROUP" "$GAMES_DIR"
 
 # ---------- 5. Usługa systemd ----------
 NODE_BIN="$(command -v node)"

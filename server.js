@@ -8,18 +8,22 @@ const express = require('express');
 
 const config = require('./lib/config');
 const auth = require('./lib/auth');
+const users = require('./lib/users');
 const sessions = require('./lib/sessions');
 const taskmgr = require('./lib/taskmgr');
 const updates = require('./lib/updates');
 const { createFiles, HttpError } = require('./lib/files');
 const terminal = require('./lib/terminal');
 const assistant = require('./lib/assistant');
+const games = require('./lib/games');
 
 const cfg = config.load();
-if (!cfg.username || !cfg.passwordHash || !cfg.sessionSecret) {
+if (!cfg.sessionSecret || (!cfg.passwordHash && !(cfg.users && cfg.users.length))) {
   console.error('Konfiguracja niekompletna. Uruchom: node scripts/setup.js');
   process.exit(1);
 }
+users.ensure(cfg);      // migrate a single-user config into the users[] list
+games.load(cfg);
 
 const files = createFiles(cfg);
 const app = express();
@@ -48,18 +52,19 @@ app.post('/api/login', express.json({ limit: '10kb' }), (req, res) => {
     return res.status(429).json({ error: `Za dużo prób. Spróbuj za ${Math.ceil(locked / 60000)} min.` });
   }
   const { username, password } = req.body || {};
-  const ok = username === cfg.username && auth.verifyPassword(password || '', cfg.passwordHash);
-  if (!ok) {
+  const user = users.verifyLogin(cfg, username, password);
+  if (!user) {
     auth.registerFailure(ip);
     console.warn(`[login] nieudane logowanie z ${ip} (użytkownik: ${String(username).slice(0, 40)})`);
     return res.status(401).json({ error: 'Nieprawidłowy login lub hasło' });
   }
   auth.clearFailures(ip);
   const session = sessions.create(req, cfg.sessionHours);
-  console.log(`[login] zalogowano z ${ip} (${session.browser}, ${session.os})`);
-  sessions.log(session.sid, 'login', `Zalogowano z ${session.ip} (${session.browser} na ${session.os})`);
-  sessions.broadcast('login', { sid: session.sid, ip: session.ip, browser: session.browser, os: session.os }, session.sid);
-  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, session.sid), cfg.sessionHours * 3600));
+  session.user = user.username;
+  console.log(`[login] zalogowano ${user.username} z ${ip} (${session.browser}, ${session.os})`);
+  sessions.log(session.sid, 'login', `Zalogowano jako ${user.username} z ${session.ip} (${session.browser} na ${session.os})`);
+  sessions.broadcast('login', { sid: session.sid, ip: session.ip, browser: session.browser, os: session.os, user: user.username }, session.sid);
+  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, session.sid, user), cfg.sessionHours * 3600));
   res.json({ ok: true });
 });
 
@@ -78,11 +83,33 @@ app.use((req, res, next) => {
   const tok = auth.sessionFromRequest(cfg, req);
   if (tok) {
     req.sid = tok.s;
+    req.user = users.byId(cfg, tok.uid) || users.byName(cfg, tok.u);
+    req.isAdmin = tok.role === 'admin';
     sessions.touch(tok.s, req);
     return next();
   }
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Sesja wygasła, zaloguj się ponownie' });
   return res.redirect('/login');
+});
+
+// Regular (non-admin) users only get the Game servers app and their own account.
+// Everything else - files, terminal, system, users, updates - is admin-only.
+const ADMIN_ONLY = [
+  '/api/list', '/api/stat', '/api/read', '/api/write', '/api/mkdir', '/api/touch',
+  '/api/rename', '/api/delete', '/api/copy', '/api/move', '/api/chmod', '/api/extract',
+  '/api/compress', '/api/raw', '/api/download', '/api/upload',
+  '/api/perf', '/api/procs', '/api/proc', '/api/kill', '/api/renice', '/api/run',
+  '/api/services', '/api/service', '/api/service-logs',
+  '/api/version', '/api/update', '/api/reboot',
+  '/api/users', '/api/panel', '/api/assistant'
+];
+app.use('/api', (req, res, next) => {
+  if (req.isAdmin) return next();
+  const full = req.baseUrl + req.path;
+  if (ADMIN_ONLY.some((p) => full === p || full.startsWith(p + '/'))) {
+    return res.status(403).json({ error: 'Ta funkcja jest dostępna tylko dla administratora' });
+  }
+  next();
 });
 
 // ---------- Activity log: what each session does ----------
@@ -151,7 +178,9 @@ app.get('/api/info', (req, res) => {
   const desktop = path.join(home, 'Desktop');
   try { fs.mkdirSync(desktop, { recursive: true }); } catch { /* read-only home */ }
   res.json({
-    username: cfg.username,
+    username: req.user ? req.user.username : '',
+    uid: req.user ? req.user.id : '',
+    role: req.user ? req.user.role : 'user',
     systemUser: u.username,
     home,
     desktop,
@@ -316,15 +345,32 @@ app.post('/api/reboot', wrap(async (req, res) => {
 
 app.post('/api/password', json, wrap(async (req, res) => {
   const { oldPassword, newPassword } = req.body || {};
-  if (!auth.verifyPassword(oldPassword || '', cfg.passwordHash)) throw new HttpError(403, 'Obecne hasło jest nieprawidłowe');
+  if (!req.user || !users.verifyPassword(oldPassword || '', req.user.passwordHash)) throw new HttpError(403, 'Obecne hasło jest nieprawidłowe');
   if (typeof newPassword !== 'string' || newPassword.length < 8) throw new HttpError(400, 'Nowe hasło musi mieć co najmniej 8 znaków');
-  cfg.passwordHash = auth.hashPassword(newPassword);
-  const stored = JSON.parse(fs.readFileSync(config.CONFIG_PATH, 'utf8'));
-  stored.passwordHash = cfg.passwordHash;
-  config.save(stored);
-  // Tokens of other sessions no longer match the password - mark them as logged out too.
-  for (const s of sessions.list(req.sid)) if (s.active && !s.current) sessions.revoke(s.sid, 'zmiana hasła');
-  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, req.sid), cfg.sessionHours * 3600));
+  users.update(cfg, req.user.id, { password: newPassword });
+  // Only this user's other sessions become invalid (their token no longer matches).
+  for (const s of sessions.list(req.sid)) if (s.active && !s.current && s.user === req.user.username) sessions.revoke(s.sid, 'zmiana hasła');
+  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, req.sid, req.user), cfg.sessionHours * 3600));
+  res.json({ ok: true });
+}));
+
+// ---------- Users (admin only; gated above) ----------
+app.get('/api/users', (req, res) => res.json(users.list(cfg)));
+app.post('/api/users', json, wrap(async (req, res) => res.json(users.add(cfg, req.body || {}))));
+app.post('/api/users/update', json, wrap(async (req, res) => {
+  const before = users.byId(cfg, req.body.id);
+  const out = users.update(cfg, req.body.id, req.body);
+  // A password reset or role change invalidates that user's active sessions.
+  if (before && (req.body.password || req.body.role)) {
+    for (const s of sessions.list(req.sid)) if (s.active && s.user === before.username && s.sid !== req.sid) sessions.revoke(s.sid, 'zmiana konta przez administratora');
+  }
+  res.json(out);
+}));
+app.post('/api/users/delete', json, wrap(async (req, res) => {
+  const u = users.byId(cfg, req.body.id);
+  if (u && u.id === req.user.id) throw new HttpError(400, 'Nie możesz usunąć własnego konta');
+  users.remove(cfg, req.body.id);
+  if (u) for (const s of sessions.list(req.sid)) if (s.user === u.username) sessions.revoke(s.sid, 'konto usunięte');
   res.json({ ok: true });
 }));
 
@@ -382,6 +428,104 @@ app.get('/api/events', (req, res) => {
   const ping = setInterval(() => res.write(': ping\n\n'), 25000);
   req.on('close', () => { clearInterval(ping); remove(); });
 });
+
+// ---------- Game servers ----------
+function loadGame(req) {
+  const s = games.get(req.params.id);
+  if (!s) throw new HttpError(404, 'Nie ma takiego serwera gry');
+  if (!users.canUseGame(req.user, s.id, s.ownerId)) throw new HttpError(403, 'Nie masz dostępu do tego serwera');
+  return s;
+}
+const gameLog = (req, text) => sessions.log(req.sid, 'game', text);
+
+app.get('/api/games/templates', (req, res) => res.json(games.templateList()));
+app.get('/api/games', (req, res) => res.json(games.visibleTo(req.user).map((s) => games.pub(s, req.user))));
+app.post('/api/games', json, wrap(async (req, res) => {
+  const s = games.create(req.user, req.body || {});
+  gameLog(req, `Utworzono serwer gry „${s.name}” (${s.templateLabel})`);
+  res.json(s);
+}));
+app.get('/api/games/:id', wrap(async (req, res) => { loadGame(req); res.json(await games.status(req.params.id)); }));
+app.get('/api/games/:id/info', wrap(async (req, res) => res.json(games.pub(loadGame(req), req.user))));
+app.post('/api/games/:id/settings', json, wrap(async (req, res) => {
+  loadGame(req);
+  res.json(games.updateSettings(req.params.id, req.body || {}));
+}));
+app.post('/api/games/:id/install', wrap(async (req, res) => {
+  const s = loadGame(req);
+  gameLog(req, `Instalacja / aktualizacja serwera „${s.name}”`);
+  res.json(await games.install(req.params.id));
+}));
+app.get('/api/games/:id/job', wrap(async (req, res) => { loadGame(req); res.json(games.jobStatus(req.params.id)); }));
+for (const action of ['start', 'stop', 'restart']) {
+  app.post(`/api/games/:id/${action}`, wrap(async (req, res) => {
+    const s = loadGame(req);
+    gameLog(req, `${{ start: 'Uruchomiono', stop: 'Zatrzymano', restart: 'Zrestartowano' }[action]} serwer „${s.name}”`);
+    res.json(await games[action](req.params.id));
+  }));
+}
+app.get('/api/games/:id/console', wrap(async (req, res) => {
+  loadGame(req);
+  res.type('text/plain; charset=utf-8').send(await games.consoleTail(req.params.id, Number(req.query.lines) || 200));
+}));
+app.post('/api/games/:id/command', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  await games.sendCommand(req.params.id, req.body.command);
+  gameLog(req, `Konsola „${s.name}”: ${String(req.body.command).slice(0, 200)}`);
+  res.json({ ok: true });
+}));
+app.get('/api/games/:id/backups', wrap(async (req, res) => { loadGame(req); res.json(games.listBackups(req.params.id)); }));
+app.post('/api/games/:id/backup', wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = await games.backup(req.params.id);
+  gameLog(req, `Utworzono kopię zapasową serwera „${s.name}”`);
+  res.json(out);
+}));
+app.post('/api/games/:id/backup/delete', json, wrap(async (req, res) => {
+  loadGame(req);
+  games.deleteBackup(req.params.id, String(req.body.name || ''));
+  res.json({ ok: true });
+}));
+app.get('/api/games/:id/backup/download', wrap(async (req, res, next) => {
+  loadGame(req);
+  const name = String(req.query.name || '');
+  if (!/^kopia-[\d-]+\.tar\.gz$/.test(name)) throw new HttpError(400, 'Nieprawidłowa nazwa kopii');
+  res.download(path.join(games.backupDir(req.params.id), name), name, (err) => { if (err && !res.headersSent) next(err); });
+}));
+// Config file editing, confined to the template's declared config files.
+function configFileName(s, name) {
+  const t = games.templates[s.template];
+  const allowed = (t.configFiles || []).map((c) => c.path);
+  if (!allowed.includes(name)) throw new HttpError(400, 'Ten plik nie jest edytowalny w tym serwerze');
+  return path.join(games.serverDir(s.id), name);
+}
+app.get('/api/games/:id/config', wrap(async (req, res) => {
+  const s = loadGame(req);
+  const t = games.templates[s.template];
+  res.json({ files: t.configFiles || [] });
+}));
+app.get('/api/games/:id/config/file', wrap(async (req, res) => {
+  const s = loadGame(req);
+  const file = configFileName(s, String(req.query.name || ''));
+  let content = '';
+  try { content = fs.readFileSync(file, 'utf8'); } catch { /* not created yet */ }
+  res.type('text/plain; charset=utf-8').send(content);
+}));
+app.post('/api/games/:id/config/file', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const file = configFileName(s, String(req.body.name || ''));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, String(req.body.content ?? ''), 'utf8');
+  gameLog(req, `Zmieniono plik ${req.body.name} serwera „${s.name}”`);
+  res.json({ ok: true });
+}));
+app.post('/api/games/:id/delete', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  if (req.user.role !== 'admin' && s.ownerId !== req.user.id) throw new HttpError(403, 'Tylko właściciel lub administrator może usunąć serwer');
+  gameLog(req, `Usunięto serwer „${s.name}”${req.body.files ? ' wraz z plikami' : ''}`);
+  await games.remove(req.params.id, !!req.body.files);
+  res.json({ ok: true });
+}));
 
 // ---------- Asystent Claude ----------
 app.get('/api/assistant/settings', (req, res) => res.json(assistant.publicSettings(cfg)));
@@ -444,6 +588,7 @@ server.headersTimeout = 60000;
 
 terminal.attachTerminal(server, cfg);
 assistant.attachAssistant(server, cfg, files);
+games.attachConsole(server, cfg);
 
 server.listen(cfg.port, cfg.host, () => {
   const proto = cfg.https ? 'https' : 'http';
