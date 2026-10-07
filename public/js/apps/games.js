@@ -255,7 +255,7 @@
         } catch (err) { WD.error(err); }
       } }, 'Zapisz pakiet');
       const extras = [];
-      if (g.runtime === 'systemd') extras.push(h('button', { class: 'btn', onclick: () => WD.apps.myserver.launch({ id: g.id }) }, 'Otwórz widok klienta'));
+      if (g.runtime === 'systemd') extras.push(h('button', { class: 'btn', onclick: () => WD.apps.myserver.launch({ id: g.id }) }, 'Otwórz widok klienta'), h('button', { class: 'btn', onclick: () => WD.apps.myserver.launch({ id: g.id, tab: 'mods' }) }, 'Mody tego serwera'));
       else if (g.template === 'valheim') extras.push(h('button', { class: 'btn', onclick: async () => {
         if (!(await WD.confirm('Przenieść na systemd?', 'Serwer zostanie zatrzymany i uruchomiony w trybie hostingowym (osobny użytkownik, limity pakietu, bezpieczne zatrzymywanie).', { okLabel: 'Przenieś' }))) return;
         try { await api.post(`/api/games/${g.id}/migrate`); WD.toast('Przeniesiono', 'ok'); loadAll(); } catch (err) { WD.error(err); }

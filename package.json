@@ -1,6 +1,6 @@
 {
   "name": "webpulpit",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Pulpit w stylu Windows w przeglądarce dla serwera Ubuntu: pliki, terminal, monitor systemu i hosting serwerów gier (Valheim) z kontami klientów.",
   "main": "server.js",
   "private": true,

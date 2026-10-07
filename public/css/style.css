@@ -985,3 +985,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .gb-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .gb-btns a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 @media (max-width: 700px) { .gb { padding: 10px; } .gb-btns { width: 100%; } .gb-btns .btn { flex: 1; } }
+
+/* ===== Mods tab ===== */
+.ms-mods { display: flex; flex-direction: column; }
+.ms-listbox.wide { max-width: none; }
+.ms-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ms-row .field { flex: 1; min-width: 200px; }
+.ms-results { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.ms-result { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--win-border); border-radius: 8px; }
+.ms-rinfo { min-width: 0; font-size: 13px; }
+.ms-modlist { display: flex; flex-direction: column; gap: 6px; }
+.ms-mod { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--win-border); border-radius: 8px; }
+.ms-mod.off { opacity: 0.55; }
+.ms-mname { font-weight: 600; font-size: 13.5px; word-break: break-all; }
+.ms-mbtns { display: flex; gap: 6px; flex-wrap: wrap; }

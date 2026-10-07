@@ -88,6 +88,14 @@ Pakiety i opcje dodatkowe można zmienić w `config.json` (`plans`, `addons`), n
 "timezone": "Europe/Warsaw"
 ```
 
+**Mody (BepInEx)** – serwer klienta może być z modami. Pakiet „Mody” (albo opcja dodatkowa „Mody + 3 GB RAM”) i uprawnienie „mody” odblokowują zakładkę **Mody**:
+włączenie trybu instaluje BepInEx, mody dodaje się po nazwie z Thunderstore (z zależnościami), wyszukiwarką albo własnym plikiem `.zip` / `.dll`.
+Można je wyłączać, aktualizować, usuwać i edytować ich pliki ustawień, a przycisk „Lista dla graczy” podaje kody modów do r2modman.
+Administrator ma dodatkowo **Skopiuj z naszego serwera** (kopia modów i ustawień z `/home/steam/valheim`, domyślnie bez ValheimEnforcer i ModProfiler;
+inna ścieżka: `mainValheimDir` w `config.json`) i widzi zakładkę Mody każdego serwera (Pakiet i klient → Mody tego serwera).
+Serwer z modami potrzebuje ok. 5–6 GB pamięci, więc panel odmawia startu klientowi, gdy na maszynie jest za mało wolnej pamięci (np. gdy działa nasz serwer).
+Własne pliki modów wykonują się na serwerze pod kontem użytkownika serwera (bez dostępu do reszty systemu), ale wgrywać je powinni tylko zaufani klienci.
+
 Istniejące serwery Valheim uruchamiane przez tmux można przenieść na ten tryb przyciskiem **Przenieś na tryb systemd** (zakładka „Pakiet i klient”).
 Ograniczenie: serwer dedykowany Valheim nie ma konsoli komend, więc klient widzi log tylko do odczytu.
 

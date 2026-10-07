@@ -130,7 +130,9 @@ const CLIENT_ALLOW = [
   ['POST', new RegExp(`^${G}/(backup|backup/delete|backup/restore)$`), 'backup'],
   ['POST', new RegExp(`^${G}/(settings|discord)$`), 'settings'],
   ['POST', new RegExp(`^${G}/players$`), 'lists'],
-  ['POST', new RegExp(`^${G}/schedule$`), 'schedule']
+  ['POST', new RegExp(`^${G}/schedule$`), 'schedule'],
+  ['GET', new RegExp(`^${G}/mods(/(search|configs|config|playerlist))?$`), 'mods'],
+  ['POST', new RegExp(`^${G}/mods/(enable|install|remove|toggle|config|upload)$`), 'mods']
 ];
 app.use('/api', (req, res, next) => {
   if (!req.user || req.user.role !== 'client') return next();
@@ -574,6 +576,68 @@ app.post('/api/games/:id/discord', json, wrap(async (req, res) => {
   gameLog(req, `${out.discordSet ? 'Ustawiono' : 'Usunięto'} webhook Discord serwera „${s.name}”`);
   res.json(out);
 }));
+// ----- mods (BepInEx): customers need the "mods" permission AND a plan/add-on with mods -----
+const who = (req) => ({ admin: !!req.isAdmin });
+app.get('/api/games/:id/mods', wrap(async (req, res) => { loadGame(req); res.json(await games.modsStatus(req.params.id, who(req))); }));
+app.get('/api/games/:id/mods/search', wrap(async (req, res) => { loadGame(req); res.json(await games.modsSearch(req.params.id, req.query.q, who(req))); }));
+app.get('/api/games/:id/mods/configs', wrap(async (req, res) => { loadGame(req); res.json(games.modsConfigs(req.params.id, who(req))); }));
+app.get('/api/games/:id/mods/config', wrap(async (req, res) => {
+  loadGame(req);
+  res.type('text/plain; charset=utf-8').send(games.modsReadConfig(req.params.id, String(req.query.file || ''), who(req)));
+}));
+app.get('/api/games/:id/mods/playerlist', wrap(async (req, res) => { loadGame(req); res.json(games.modsPlayerList(req.params.id, who(req))); }));
+app.post('/api/games/:id/mods/enable', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = await games.modsEnable(req.params.id, !!req.body.enabled, who(req));
+  gameLog(req, `${req.body.enabled ? 'Włączono' : 'Wyłączono'} tryb z modami na serwerze „${s.name}”`);
+  res.json(out);
+}));
+app.post('/api/games/:id/mods/install', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = await games.modsInstall(req.params.id, String(req.body.package || ''), { force: !!req.body.force }, who(req));
+  gameLog(req, `Zainstalowano mod ${req.body.package} na serwerze „${s.name}” (${out.installed.length} paczek)`);
+  res.json(out);
+}));
+app.post('/api/games/:id/mods/remove', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  res.json(await games.modsRemove(req.params.id, String(req.body.name || ''), who(req)));
+  gameLog(req, `Usunięto mod ${req.body.name} z serwera „${s.name}”`);
+}));
+app.post('/api/games/:id/mods/toggle', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  res.json(await games.modsToggle(req.params.id, String(req.body.name || ''), !!req.body.enabled, who(req)));
+  gameLog(req, `${req.body.enabled ? 'Włączono' : 'Wyłączono'} mod ${req.body.name} na serwerze „${s.name}”`);
+}));
+app.post('/api/games/:id/mods/config', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  res.json(await games.modsWriteConfig(req.params.id, String(req.body.file || ''), req.body.content, who(req)));
+  gameLog(req, `Zmieniono konfigurację moda ${req.body.file} na serwerze „${s.name}”`);
+}));
+app.post('/api/games/:id/mods/clone', json, wrap(async (req, res) => {
+  if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');
+  const s = loadGame(req);
+  gameLog(req, `Skopiowano mody z głównego serwera na „${s.name}”`);
+  res.json(await games.modsClone(req.params.id, req.body || {}, who(req)));
+}));
+// Raw zip / dll upload (body is the file itself, name in ?name=). Streamed to disk with a size cap.
+app.post('/api/games/:id/mods/upload', wrap(async (req, res) => {
+  const s = loadGame(req);
+  const name = String(req.query.name || '').slice(0, 120);
+  if (!/\.(zip|dll)$/i.test(name)) throw new HttpError(400, 'Wgraj plik .zip (paczka moda) albo .dll');
+  const max = require('./lib/mods').MAX_ZIP;
+  if (Number(req.headers['content-length']) > max) throw new HttpError(413, 'Plik jest za duży (maks. 400 MB)');
+  const tmp = path.join(games.serverDir(s.id), `.wp-upload-${Date.now()}`);
+  try {
+    let n = 0;
+    const { Transform } = require('stream');
+    const cap = new Transform({ transform(chunk, _e, cb) { n += chunk.length; cb(n > max ? new HttpError(413, 'Plik jest za duży (maks. 400 MB)') : null, chunk); } });
+    await require('stream/promises').pipeline(req, cap, fs.createWriteStream(tmp));
+    const out = await games.modsUpload(req.params.id, tmp, name, who(req));
+    gameLog(req, `Wgrano mod ${name} na serwer „${s.name}”`);
+    res.json(out);
+  } finally { fs.rmSync(tmp, { force: true }); }
+}));
+
 // Admin only: plan, add-ons, validity, move to the systemd runtime.
 app.post('/api/games/:id/admin', json, wrap(async (req, res) => {
   if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');

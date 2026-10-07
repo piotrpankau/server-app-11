@@ -5,7 +5,7 @@
 (function (WD) {
   const { h, api, fmt } = WD;
 
-  const ALL_PERMS = ['power', 'reset', 'backup', 'settings', 'lists', 'schedule'];
+  const ALL_PERMS = ['power', 'reset', 'backup', 'settings', 'lists', 'schedule', 'mods'];
   const LIST_LABELS = { permitted: 'Lista dozwolonych (whitelist)', admin: 'Administratorzy serwera', banned: 'Zbanowani' };
   const LIST_HELP = {
     permitted: 'Gdy lista nie jest pusta, wejdą tylko wpisani gracze (poza hasłem serwera).',
@@ -21,7 +21,7 @@
     let st = {};             // status
     let us = {};             // usage
     let on = { count: 0, ids: [], supported: false };
-    let tab = 'log';
+    let tab = opts.tab || 'log';
     let closed = false;
     let timer = null;
     let slowTick = 0;
@@ -163,12 +163,13 @@
     }
 
     // ----- tabs -----
-    const TABS = [['log', 'Log'], ['settings', 'Ustawienia'], ['players', 'Gracze'], ['backups', 'Kopie zapasowe'], ['schedule', 'Harmonogram'], ['plan', 'Pakiet']];
+    const tabList = () => [['log', 'Log'], ['settings', 'Ustawienia'], ...((g.limits && g.limits.mods) || isAdmin ? (can('mods') ? [['mods', 'Mody']] : []) : []), ['players', 'Gracze'], ['backups', 'Kopie zapasowe'], ['schedule', 'Harmonogram'], ['plan', 'Pakiet']];
     function renderTabs() {
-      tabsEl.replaceChildren(...TABS.map(([id, label]) => h('button', { class: 'gm-tab' + (tab === id ? ' on' : ''), onclick: () => { tab = id; renderTabs(); renderPane(); } }, label)));
+      if (!tabList().some(([id]) => id === tab)) tab = 'log';
+      tabsEl.replaceChildren(...tabList().map(([id, label]) => h('button', { class: 'gm-tab' + (tab === id ? ' on' : ''), onclick: () => { tab = id; renderTabs(); renderPane(); } }, label)));
     }
     function renderPane() {
-      ({ log: paneLog, settings: paneSettings, players: panePlayers, backups: paneBackups, schedule: paneSchedule, plan: panePlan })[tab]();
+      ({ log: paneLog, settings: paneSettings, mods: paneMods, players: panePlayers, backups: paneBackups, schedule: paneSchedule, plan: panePlan })[tab]();
     }
 
     // ----- log -----
@@ -211,6 +212,137 @@
         h('label', { class: 'tm-radio' }, auto, ' Uruchamiaj serwer automatycznie po restarcie maszyny'),
         h('div', { class: 'tm-dim', style: { marginTop: '12px' } }, `Świat: ${g.settings.world} · port ${g.settings.port}/UDP (serwer używa ${g.settings.port}–${+g.settings.port + 2}). Port i nazwę świata zmienia administrator albo reset świata.`),
         h('div', { class: 'gm-formbtns' }, save)));
+    }
+
+    // ----- mods -----
+    const sizeTxt = (n) => (n ? fmt.size(n) : '');
+    async function paneMods() {
+      pane.replaceChildren(h('div', { class: 'gm-welcome' }, 'Wczytywanie…'));
+      let info; try { info = await api.get(`/api/games/${g.id}/mods`); } catch (err) { return WD.error(err); }
+      const box = h('div', { class: 'ms-mods' });
+      const reload = () => paneMods();
+      const modsOn = info.modded && info.installed;
+      const ramLow = info.ram && info.ram.availMb != null && info.ram.availMb < (modsOn ? info.ram.needMb : info.ram.moddedMb) * 0.85;
+
+      // switch
+      const sw = h('div', { class: 'ms-listbox' },
+        h('h4', {}, 'Tryb z modami'),
+        h('div', { class: 'tm-dim' }, modsOn ? 'Serwer startuje z BepInEx i modami z listy poniżej.' : info.installed ? 'BepInEx jest zainstalowany, ale tryb z modami jest wyłączony.' : 'Serwer działa bez modów. Włączenie pobierze i zainstaluje BepInEx (około minuty).'),
+        info.ram && info.ram.moddedMb ? h('div', { class: 'tm-dim' }, `Serwer z modami zwykle potrzebuje ok. ${info.ram.moddedMb} MB pamięci${info.memoryMb ? ` (limit pakietu: ${info.memoryMb} MB)` : ''}. Teraz wolne na maszynie: ${info.ram.availMb} MB.`) : null,
+        ramLow ? h('div', { class: 'ms-banner warn' }, 'Na maszynie jest teraz mało wolnej pamięci. Start serwera z modami może zostać odrzucony, dopóki administrator nie zwolni zasobów.') : null,
+        h('div', {}, h('button', { class: 'btn ' + (modsOn ? 'danger-outline' : 'primary'), disabled: busyUi, onclick: () => guarded(async () => {
+          if (modsOn && !(await WD.confirm('Wyłączyć mody?', 'Serwer przy następnym starcie ruszy bez modów. Pliki modów zostają na dysku. Uwaga: świat zapisany z modami może nie działać poprawnie bez nich.', { okLabel: 'Wyłącz', danger: true }))) return;
+          WD.toast(modsOn ? 'Wyłączam tryb z modami…' : 'Instaluję BepInEx, to potrwa chwilę…');
+          await api.post(`/api/games/${g.id}/mods/enable`, { enabled: !modsOn });
+          WD.toast(modsOn ? 'Mody wyłączone (od następnego startu)' : 'Mody włączone. Zainstaluj mody i zrestartuj serwer.', 'ok'); reload();
+        }) }, modsOn ? 'Wyłącz mody' : 'Włącz mody (zainstaluj BepInEx)')),
+        info.running ? h('div', { class: 'tm-dim' }, 'Serwer działa: zmiany modów i ich ustawień zadziałają po restarcie.') : null);
+      box.append(sw);
+      if (!info.installed) { pane.replaceChildren(box); return; }
+
+      // install by name / search
+      const ref = h('input', { class: 'field', placeholder: 'Autor-Nazwa albo adres ze strony Thunderstore (np. ValheimModding-Jotunn)', spellcheck: 'false' });
+      const installBtn = h('button', { class: 'btn primary', disabled: busyUi, onclick: () => installRef(ref.value) }, 'Zainstaluj');
+      const q = h('input', { class: 'field', placeholder: 'Szukaj na Thunderstore (np. epic loot, jotunn, backpacks)…', spellcheck: 'false' });
+      const results = h('div', { class: 'ms-results' });
+      let qt; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(doSearch, 350); });
+      async function doSearch() {
+        if (q.value.trim().length < 2) { results.replaceChildren(); return; }
+        results.replaceChildren(h('div', { class: 'tm-dim' }, 'Szukam…'));
+        try {
+          const found = await api.get(`/api/games/${g.id}/mods/search`, { q: q.value });
+          results.replaceChildren(...found.map((m) => h('div', { class: 'ms-result' },
+            h('div', { class: 'ms-rinfo' }, h('div', {}, h('b', {}, m.name), ` ${m.version} · ${m.owner} `, h('span', { class: 'gb-badge' }, { server: 'serwer', client: 'tylko klient', both: 'serwer + klient' }[m.side])), h('div', { class: 'tm-dim' }, m.description), h('div', { class: 'tm-dim' }, `${(m.downloads / 1000).toFixed(0)}k pobrań · ${fmt.size(m.size)}`)),
+            h('button', { class: 'btn', disabled: busyUi, onclick: () => installRef(m.full) }, 'Zainstaluj'))));
+          if (!found.length) results.replaceChildren(h('div', { class: 'tm-dim' }, 'Nic nie znaleziono.'));
+        } catch (err) { results.replaceChildren(); WD.error(err); }
+      }
+      function installRef(r, force) {
+        if (!r.trim()) return;
+        return guarded(async () => {
+          WD.toast('Pobieram i instaluję mod z zależnościami…');
+          const out = await api.post(`/api/games/${g.id}/mods/install`, { package: r.trim(), force: !!force });
+          WD.toast(out.installed.length ? `Zainstalowano: ${out.installed.join(', ')}` : 'Wszystko już jest zainstalowane', 'ok', 7000);
+          reload();
+        });
+      }
+      box.append(h('div', { class: 'ms-listbox' }, h('h4', {}, 'Dodaj mod'),
+        h('div', { class: 'ms-row' }, ref, installBtn), q, results,
+        h('div', { class: 'ms-row' }, h('button', { class: 'btn', disabled: busyUi, onclick: () => upload() }, 'Wgraj własny mod (.zip / .dll)'),
+          h('span', { class: 'tm-dim' }, 'Własne pliki uruchamiają się na serwerze – wgrywaj tylko to, czemu ufasz.'))));
+
+      // installed list
+      const rows = info.mods.map((m) => h('div', { class: 'ms-mod' + (m.enabled ? '' : ' off') },
+        h('div', { class: 'ms-minfo' }, h('div', { class: 'ms-mname' }, m.name, m.version ? h('span', { class: 'tm-dim' }, ' ' + m.version) : null),
+          h('div', { class: 'tm-dim' }, `${m.source === 'thunderstore' ? 'Thunderstore' : m.source === 'upload' || m.source === 'local' ? 'własny' : m.source === 'cloned' ? 'skopiowany' : 'nieznane źródło'}${m.size ? ' · ' + sizeTxt(m.size) : ''}`)),
+        h('div', { class: 'ms-mbtns' },
+          h('button', { class: 'btn', disabled: busyUi, onclick: () => guarded(async () => { await api.post(`/api/games/${g.id}/mods/toggle`, { name: m.name, enabled: !m.enabled }); reload(); }) }, m.enabled ? 'Wyłącz' : 'Włącz'),
+          m.source === 'thunderstore' ? h('button', { class: 'btn', disabled: busyUi, title: 'Pobierz najnowszą wersję', onclick: () => installRef(m.name, true) }, 'Aktualizuj') : null,
+          h('button', { class: 'btn danger-outline', disabled: busyUi, onclick: async () => { if (await WD.confirm('Usuń mod', `Usunąć „${m.name}”? Pliki moda zostaną skasowane (jego ustawienia zostają).`, { okLabel: 'Usuń', danger: true })) guarded(async () => { await api.post(`/api/games/${g.id}/mods/remove`, { name: m.name }); reload(); }); } }, 'Usuń'))));
+      box.append(h('div', { class: 'ms-listbox wide' },
+        h('div', { class: 'ms-row' }, h('h4', { style: { flex: 1 } }, `Zainstalowane mody (${info.mods.length})`),
+          h('button', { class: 'btn', onclick: () => configDialog() }, 'Ustawienia modów…'), h('button', { class: 'btn', onclick: () => playerListDialog() }, 'Lista dla graczy'),
+          isAdmin ? h('button', { class: 'btn', onclick: () => cloneDialog() }, 'Skopiuj z naszego serwera…') : null),
+        rows.length ? h('div', { class: 'ms-modlist' }, ...rows) : h('div', { class: 'tm-dim' }, 'Brak modów. Dodaj pierwszy powyżej.')));
+      pane.replaceChildren(box);
+    }
+
+    function upload() {
+      const f = h('input', { type: 'file', accept: '.zip,.dll', style: { display: 'none' } });
+      f.addEventListener('change', () => {
+        const file = f.files[0]; if (!file) return;
+        guarded(async () => {
+          WD.toast(`Wgrywam ${file.name} (${fmt.size(file.size)})…`);
+          const r = await fetch(`/api/games/${g.id}/mods/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', credentials: 'same-origin', headers: { 'X-WebPulpit': '1', 'Content-Type': 'application/octet-stream' }, body: file });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || `Błąd ${r.status}`);
+          WD.toast('Mod wgrany', 'ok'); paneMods();
+        });
+      });
+      document.body.append(f); f.click(); setTimeout(() => f.remove(), 60000);
+    }
+
+    async function configDialog() {
+      let files; try { files = await api.get(`/api/games/${g.id}/mods/configs`); } catch (err) { return WD.error(err); }
+      if (!files.length) return WD.alert('Brak plików', 'Mody nie utworzyły jeszcze plików ustawień. Pojawią się po pierwszym uruchomieniu serwera z modami.');
+      const filter = h('input', { class: 'field', placeholder: 'Filtruj pliki…', spellcheck: 'false' });
+      const sel = h('select', { class: 'field', size: 6, style: { height: '130px' } });
+      const fill = () => { sel.replaceChildren(...files.filter((f) => f.file.toLowerCase().includes(filter.value.toLowerCase())).map((f) => h('option', { value: f.file }, f.file))); };
+      filter.addEventListener('input', fill); fill();
+      const ta = h('textarea', { class: 'gm-configta', spellcheck: 'false', style: { minHeight: '260px', width: '100%' } });
+      sel.addEventListener('change', async () => { try { ta.value = await api.get(`/api/games/${g.id}/mods/config`, { file: sel.value }); } catch (err) { WD.error(err); } });
+      const v = await WD.dialog({ title: 'Ustawienia modów', body: h('div', { style: { width: 'min(640px, 86vw)' } }, filter, sel, ta, h('div', { class: 'tm-dim' }, 'Zmiany zadziałają po restarcie serwera. Uważaj na składnię – zły plik może zablokować moda.')),
+        buttons: [{ label: 'Zapisz plik', value: 'save', kind: 'primary' }, { label: 'Zamknij', value: null }], validate: (val) => { if (val !== 'save') return true; if (!sel.value) { WD.toast('Wybierz plik z listy', 'error'); return false; } return true; } });
+      if (v !== 'save') return;
+      try { await api.post(`/api/games/${g.id}/mods/config`, { file: sel.value, content: ta.value }); WD.toast('Zapisano ' + sel.value, 'ok'); } catch (err) { WD.error(err); }
+    }
+
+    async function playerListDialog() {
+      let pl; try { pl = await api.get(`/api/games/${g.id}/mods/playerlist`); } catch (err) { return WD.error(err); }
+      const text = pl.thunderstore.join('\n');
+      const ta = h('textarea', { class: 'gm-configta', readonly: true, style: { minHeight: '200px', width: '100%' } }); ta.value = text;
+      await WD.dialog({ title: 'Mody, które muszą mieć gracze', body: h('div', { style: { width: 'min(560px, 86vw)' } },
+        h('div', { class: 'tm-dim', style: { marginBottom: '6px' } }, 'Gracze potrzebują tych samych wersji po swojej stronie (r2modman / Thunderstore: Import → wpisz kody modów). Mody tylko serwerowe nie są potrzebne u graczy.'),
+        ta, pl.manual.length ? h('div', { class: 'tm-dim', style: { marginTop: '8px' } }, 'Własne mody (przekaż graczom pliki ręcznie): ' + pl.manual.join(', ')) : null),
+        buttons: [{ label: 'Kopiuj listę', value: 'copy', kind: 'primary' }, { label: 'Zamknij', value: null }] }).then((v) => { if (v === 'copy') copy(text); });
+    }
+
+    async function cloneDialog() {
+      const cfgBox = h('input', { type: 'checkbox', checked: true });
+      const enf = h('input', { type: 'checkbox', checked: true });
+      const v = await WD.dialog({ title: 'Skopiuj mody z naszego serwera', body: h('div', {},
+        h('p', {}, 'Skopiuje wszystkie mody z głównego serwera Valheim na ten serwer i włączy tryb z modami. Obecne mody tego serwera zostaną zastąpione. Operacja może potrwać kilkadziesiąt sekund.'),
+        h('label', { class: 'tm-radio' }, cfgBox, ' Skopiuj też ustawienia modów (BepInEx/config)'),
+        h('label', { class: 'tm-radio' }, enf, ' Pomiń ValheimEnforcer i ModProfiler (zalecane – Enforcer wyrzuca graczy spoza naszej listy)')),
+        buttons: [{ label: 'Kopiuj', value: 'go', kind: 'primary' }, { label: 'Anuluj', value: null }] });
+      if (v !== 'go') return;
+      guarded(async () => {
+        WD.toast('Kopiuję mody…', '', 8000);
+        const out = await api.post(`/api/games/${g.id}/mods/clone`, { config: cfgBox.checked, skipEnforcer: enf.checked });
+        await WD.alert('Gotowe', h('div', {}, `Skopiowano z ${out.source}. Pominięto: ${out.removed.length ? out.removed.join(', ') : 'nic'}.`,
+          out.sensitive.length ? h('p', {}, 'Uwaga: te pliki ustawień mogą zawierać hasła, tokeny albo webhooki – sprawdź je w „Ustawienia modów”: ' + out.sensitive.join(', ')) : null));
+        paneMods();
+      });
     }
 
     // ----- players -----
@@ -304,6 +436,7 @@
         row('Crossplay', yes(lim.crossplay)),
         row('Powiadomienia Discord', yes(lim.discord)),
         row('Drugi świat', yes(lim.world2)),
+        row('Mody (BepInEx)', yes(lim.mods)),
         h('div', { class: 'tm-dim', style: { marginTop: '14px' } }, 'Chcesz więcej? Napisz do administratora – pakiety i opcje dodatkowe włącza on w panelu.')));
     }
 

@@ -45,7 +45,7 @@
         h('option', { value: 'client', selected: !u || u.role === 'client' }, 'Klient hostingu (tylko „Mój serwer”)'),
         h('option', { value: 'user', selected: u && u.role === 'user' }, 'Użytkownik (serwery gier)'),
         h('option', { value: 'admin', selected: u && u.role === 'admin' }, 'Administrator (pełny dostęp)'));
-      const PERMS = [['power', 'start / stop / restart'], ['reset', 'reset świata'], ['backup', 'kopie zapasowe'], ['settings', 'ustawienia serwera'], ['lists', 'listy graczy'], ['schedule', 'harmonogram']];
+      const PERMS = [['power', 'start / stop / restart'], ['reset', 'reset świata'], ['backup', 'kopie zapasowe'], ['settings', 'ustawienia serwera'], ['lists', 'listy graczy'], ['schedule', 'harmonogram'], ['mods', 'mody (jeśli pakiet je obejmuje)']];
       const curPerms = u && Array.isArray(u.perms) ? u.perms : PERMS.map((p) => p[0]);
       const permBoxes = PERMS.map(([k, label]) => h('label', { class: 'tm-radio' }, h('input', { type: 'checkbox', value: k, checked: curPerms.includes(k) }), ' ' + label));
       const permsWrap = h('div', { class: 'us-games', hidden: roleSel.value !== 'client' }, h('div', { class: 'tm-dim', style: { margin: '6px 0' } }, 'Co klient może robić na swoim serwerze:'), ...permBoxes);
