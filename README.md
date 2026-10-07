@@ -46,6 +46,9 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
   - dodawanie kont z rolą **administrator** (pełny dostęp) lub **użytkownik** (widzi tylko „Serwery gier” i przypisane mu serwery – bez terminala, plików i ustawień systemu),
   - przypisywanie użytkownikom konkretnych serwerów gier, zmiana hasła i roli, usuwanie kont,
   - logowanie tą samą stroną, każdy swoim loginem i hasłem.
+- **Emperor's Gambit** (aplikacja do testowania gry): lista wszystkich wdrożonych wersji webowych, wykrywanych automatycznie z konfiguracji Caddy
+  i podfolderów (np. `0.8.2/P`). Każda wersja ma przyciski **Uruchom** (nowa karta), **W oknie** (w oknie panelu), **APK**, **Link**;
+  administrator może nazwać, przypiąć i usunąć starą wersję. Nowy deploy pojawia się na liście sam. Opcjonalnie `gambit.caddyfile` w `config.json`.
 - **Serwery gier** (aplikacja „Serwery gier”) – mały panel hostingowy dla Ciebie i znajomych:
   - **wyszukiwarka gier**: wpisujesz nazwę (np. „Rust”, „Palworld”, „ARK”), a panel sam podpowiada dane do instalacji – AppID serwera ze Steam, komendę startową i porty (z wbudowanego katalogu popularnych gier oraz podpowiedzi na żywo ze Steam),
   - gotowe szablony: **Valheim**, **Counter-Strike 2**, **Minecraft (Java)**, dowolna inna gra ze **Steam** (podajesz AppID) albo własne polecenie startowe,

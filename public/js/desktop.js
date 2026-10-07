@@ -10,6 +10,7 @@
   const shortcuts = () => ([
     { name: 'Mój serwer', icon: 'games', onlyClient: true, open: () => WD.apps.myserver.launch() },
     { name: 'Serwery gier', icon: 'games', open: () => WD.apps.games.launch() },
+    { name: 'Emperor\'s Gambit', icon: 'gambit', open: () => WD.apps.gambit.launch() },
     { name: 'Ten komputer', icon: 'computer', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }), dir: WD.info.root || '/' },
     { name: 'Folder domowy', icon: 'home', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.home }), dir: WD.info.home },
     { name: 'Terminal', icon: 'terminal', admin: true, open: () => WD.apps.terminal.launch({}) },
@@ -239,6 +240,7 @@
     return [
       { name: 'Mój serwer', icon: 'games', onlyClient: true, open: () => WD.apps.myserver.launch() },
       { name: 'Serwery gier', icon: 'games', open: () => WD.apps.games.launch() },
+      { name: 'Emperor\'s Gambit', icon: 'gambit', open: () => WD.apps.gambit.launch() },
       { name: 'Eksplorator plików', icon: 'home', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.home }) },
       { name: 'Ten komputer', icon: 'computer', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.root || '/' }) },
       { name: 'Pulpit', icon: 'desktopfolder', admin: true, open: () => WD.apps.explorer.launch({ path: WD.info.desktop }) },

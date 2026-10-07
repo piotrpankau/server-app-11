@@ -17,6 +17,7 @@ const terminal = require('./lib/terminal');
 const assistant = require('./lib/assistant');
 const games = require('./lib/games');
 const gamecatalog = require('./lib/gamecatalog');
+const gambit = require('./lib/gambit');
 
 const cfg = config.load();
 if (!cfg.sessionSecret || (!cfg.passwordHash && !(cfg.users && cfg.users.length))) {
@@ -622,6 +623,19 @@ app.post('/api/games/:id/delete', json, wrap(async (req, res) => {
   gameLog(req, `Usunięto serwer „${s.name}”${req.body.files ? ' wraz z plikami' : ''}`);
   await games.remove(req.params.id, !!req.body.files);
   res.json({ ok: true });
+}));
+
+// ---------- Emperor's Gambit: all web builds, found automatically ----------
+app.get('/api/gambit/builds', (req, res) => res.json(gambit.discover(cfg, req.query.fresh === '1')));
+app.post('/api/gambit/meta', json, wrap(async (req, res) => {
+  if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');
+  res.json(gambit.setMeta(cfg, String(req.body.id || ''), req.body));
+}));
+app.post('/api/gambit/delete', json, wrap(async (req, res) => {
+  if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');
+  const out = gambit.remove(cfg, String(req.body.id || ''));
+  sessions.log(req.sid, 'file', `Usunięto wersję gry: ${out.removed}`);
+  res.json(out);
 }));
 
 // ---------- Asystent Claude ----------
