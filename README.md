@@ -55,6 +55,39 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
   - **kopie zapasowe** świata / danych jednym kliknięciem, do pobrania,
   - każdy serwer działa w osobnej sesji tmux, więc przetrwa restart panelu; pamiętaj o otwarciu portów gry w zaporze / Linode Cloud Firewall.
 
+## Hosting Valheim dla klientów (v2)
+
+Wersja 2 zamienia „Serwery gier” w mały panel hostingowy. Klient dostaje **własne konto**, które widzi wyłącznie aplikację
+**„Mój serwer”** i swój serwer Valheim. Nie ma dostępu do plików, terminala, procesów, usług ani cudzych serwerów.
+
+**Co robi klient** (w zakresie nadanych mu uprawnień): start / stop / restart, **reset świata** (z automatyczną kopią),
+kopie zapasowe z przywracaniem, nazwa i hasło serwera, listy graczy (whitelist / admini / bany), podgląd logu i graczy online,
+zużycie pamięci i procesora, harmonogram (codzienny restart tylko gdy nikt nie gra, automatyczne kopie), powiadomienia na Discordzie.
+
+**Jak to działa po stronie serwera**
+- Każdy serwer klienta to osobna usługa systemd `wpsrv-<id>` z osobnym użytkownikiem Linux `wpg-<id>`.
+  Zatrzymanie wysyła SIGINT i czeka do 5 minut, więc Valheim zdąży zapisać świat.
+- Limity pamięci i procesora wynikają z pakietu. Usługa ma niski priorytet i jest zabijana przez jądro przed głównym serwerem.
+- Porty przydzielają się same (od 2466, po 3 na serwer), z pominięciem 2456–2458. Otwórz je w Linode Cloud Firewall (UDP).
+- Rola `client` działa na liście dozwolonych endpointów (wszystko inne to 403). Restart, reset i przywracanie mają limit raz na minutę.
+
+**Jak dodać klienta**
+1. **Serwery gier → Nowy serwer → Valheim**, wybierz pakiet i ważność (dni). Zainstaluj pliki serwera.
+2. **Użytkownicy → Dodaj**, rola **Klient hostingu**, zaznacz serwer i uprawnienia.
+3. Przekaż klientowi adres panelu, login i hasło. Przedłużenie usługi: **Serwery gier → serwer → Pakiet i klient → +30 dni**.
+
+Po terminie ważności serwer działa jeszcze 3 dni (karencja), potem jest zatrzymywany, a klient widzi ostrzeżenia w panelu.
+Pakiety i opcje dodatkowe można zmienić w `config.json` (`plans`, `addons`), np.:
+
+```json
+"plans": { "start": { "label": "Start", "memoryMb": 2500, "cpuQuota": 150, "backups": 3, "schedule": false, "autoBackup": false, "crossplay": false } },
+"publicHost": "panel.example.com",
+"timezone": "Europe/Warsaw"
+```
+
+Istniejące serwery Valheim uruchamiane przez tmux można przenieść na ten tryb przyciskiem **Przenieś na tryb systemd** (zakładka „Pakiet i klient”).
+Ograniczenie: serwer dedykowany Valheim nie ma konsoli komend, więc klient widzi log tylko do odczytu.
+
 ## Instalacja na serwerze (Linode, Ubuntu)
 
 ### 1. Połącz się z serwerem z Windows

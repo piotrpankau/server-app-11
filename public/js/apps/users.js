@@ -14,7 +14,7 @@
     win.body.append(h('div', { class: 'settings' },
       h('div', { class: 'us-head' }, h('h3', { style: { margin: 0 } }, 'Konta panelu'),
         h('button', { class: 'btn primary', onclick: () => editUser(null) }, '+ Dodaj użytkownika')),
-      h('p', { class: 'about' }, 'Administrator ma pełny dostęp. Zwykły użytkownik widzi tylko aplikację „Serwery gier” i przypisane mu serwery – bez terminala, plików i ustawień systemu.'),
+      h('p', { class: 'about' }, 'Administrator ma pełny dostęp. Użytkownik widzi „Serwery gier” i przypisane mu serwery. Klient (hosting) widzi wyłącznie aplikację „Mój serwer” ze swoim serwerem Valheim – bez plików, terminala i systemu.'),
       body));
 
     async function refresh() {
@@ -29,7 +29,7 @@
         h('span', { class: 'avatar us-av' }, (u.username[0] || '?')),
         h('div', { class: 'us-info' },
           h('div', { class: 'us-name' }, u.username, u.id === WD.info.uid ? h('span', { class: 'ss-badge' }, 'to Ty') : null),
-          h('div', { class: 'us-sub' }, u.role === 'admin' ? 'Administrator' : `Użytkownik · serwery: ${u.games && u.games.length ? u.games.length : 'brak'}`)),
+          h('div', { class: 'us-sub' }, u.role === 'admin' ? 'Administrator' : `${u.role === 'client' ? 'Klient' : 'Użytkownik'} · serwery: ${u.games && u.games.length ? u.games.length : 'brak'}`)),
         h('div', { class: 'us-actions' },
           h('button', { class: 'tbtn', title: 'Edytuj', html: WD.glyph('rename'), onclick: () => editUser(u) }),
           h('button', { class: 'tbtn', title: 'Usuń', html: WD.glyph('trash'), onclick: () => del(u) }))
@@ -41,26 +41,34 @@
       const isNew = !u;
       const nameI = h('input', { class: 'field', value: u ? u.username : '', placeholder: 'login', spellcheck: 'false', disabled: !isNew });
       const passI = h('input', { class: 'field', type: 'password', placeholder: isNew ? 'hasło (min. 8 znaków)' : 'nowe hasło (puste = bez zmiany)', autocomplete: 'new-password' });
-      const roleSel = h('select', { class: 'field' }, h('option', { value: 'user', selected: u && u.role === 'user' }, 'Użytkownik (tylko serwery gier)'), h('option', { value: 'admin', selected: u && u.role === 'admin' }, 'Administrator (pełny dostęp)'));
+      const roleSel = h('select', { class: 'field' },
+        h('option', { value: 'client', selected: !u || u.role === 'client' }, 'Klient hostingu (tylko „Mój serwer”)'),
+        h('option', { value: 'user', selected: u && u.role === 'user' }, 'Użytkownik (serwery gier)'),
+        h('option', { value: 'admin', selected: u && u.role === 'admin' }, 'Administrator (pełny dostęp)'));
+      const PERMS = [['power', 'start / stop / restart'], ['reset', 'reset świata'], ['backup', 'kopie zapasowe'], ['settings', 'ustawienia serwera'], ['lists', 'listy graczy'], ['schedule', 'harmonogram']];
+      const curPerms = u && Array.isArray(u.perms) ? u.perms : PERMS.map((p) => p[0]);
+      const permBoxes = PERMS.map(([k, label]) => h('label', { class: 'tm-radio' }, h('input', { type: 'checkbox', value: k, checked: curPerms.includes(k) }), ' ' + label));
+      const permsWrap = h('div', { class: 'us-games', hidden: roleSel.value !== 'client' }, h('div', { class: 'tm-dim', style: { margin: '6px 0' } }, 'Co klient może robić na swoim serwerze:'), ...permBoxes);
       const gameBoxes = games.map((g) => {
         const cb = h('input', { type: 'checkbox', value: g.id, checked: u && u.games && u.games.includes(g.id) });
         return h('label', { class: 'tm-radio' }, cb, ` ${g.name} `, h('span', { class: 'tm-dim' }, `(${g.templateLabel})`));
       });
       const gamesWrap = h('div', { class: 'us-games', hidden: roleSel.value === 'admin' },
         h('div', { class: 'tm-dim', style: { margin: '6px 0' } }, games.length ? 'Serwery, którymi może zarządzać ten użytkownik:' : 'Nie ma jeszcze żadnych serwerów gier.'), ...gameBoxes);
-      roleSel.addEventListener('change', () => { gamesWrap.hidden = roleSel.value === 'admin'; });
+      roleSel.addEventListener('change', () => { gamesWrap.hidden = roleSel.value === 'admin'; permsWrap.hidden = roleSel.value !== 'client'; });
       const v = await WD.dialog({
         title: isNew ? 'Nowy użytkownik' : `Edytuj: ${u.username}`,
-        body: h('div', {}, h('label', {}, 'Login'), nameI, h('label', {}, 'Hasło'), passI, h('label', {}, 'Rola'), roleSel, gamesWrap),
+        body: h('div', {}, h('label', {}, 'Login'), nameI, h('label', {}, 'Hasło'), passI, h('label', {}, 'Rola'), roleSel, gamesWrap, permsWrap),
         buttons: [{ label: 'Zapisz', value: 'save', kind: 'primary' }, { label: 'Anuluj', value: null }],
         onOpen: () => (isNew ? nameI : passI).focus()
       });
       if (v !== 'save') return;
+      const chosenPerms = permBoxes.filter((b) => b.querySelector('input').checked).map((b) => b.querySelector('input').value);
       const chosenGames = gameBoxes.filter((b) => b.querySelector('input').checked).map((b) => b.querySelector('input').value);
       try {
-        if (isNew) await api.post('/api/users', { username: nameI.value, password: passI.value, role: roleSel.value, games: chosenGames });
+        if (isNew) await api.post('/api/users', { username: nameI.value, password: passI.value, role: roleSel.value, games: chosenGames, perms: chosenPerms });
         else {
-          const patch = { id: u.id, role: roleSel.value, games: chosenGames };
+          const patch = { id: u.id, role: roleSel.value, games: chosenGames, perms: chosenPerms };
           if (passI.value) patch.password = passI.value;
           await api.post('/api/users/update', patch);
         }

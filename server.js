@@ -113,6 +113,34 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// Hosting customers ("client" role) get an allow-list, not a deny-list: anything not listed here is 403.
+// [method, path pattern, permission needed (null = always allowed for assigned servers)]
+const G = '/api/games/[a-f0-9]{10}';
+const CLIENT_ALLOW = [
+  ['GET', /^\/api\/info$/, null],
+  ['POST', /^\/api\/password$/, null],
+  ['GET', /^\/api\/events$/, null],
+  ['GET', /^\/api\/games$/, null],
+  ['GET', new RegExp(`^${G}$`), null],
+  ['GET', new RegExp(`^${G}/(info|console|usage|online|players)$`), null],
+  ['GET', new RegExp(`^${G}/(backups|backup/download)$`), 'backup'],
+  ['POST', new RegExp(`^${G}/(start|stop|restart)$`), 'power'],
+  ['POST', new RegExp(`^${G}/reset-world$`), 'reset'],
+  ['POST', new RegExp(`^${G}/(backup|backup/delete|backup/restore)$`), 'backup'],
+  ['POST', new RegExp(`^${G}/(settings|discord)$`), 'settings'],
+  ['POST', new RegExp(`^${G}/players$`), 'lists'],
+  ['POST', new RegExp(`^${G}/schedule$`), 'schedule']
+];
+app.use('/api', (req, res, next) => {
+  if (!req.user || req.user.role !== 'client') return next();
+  const full = req.baseUrl + req.path;
+  const rule = CLIENT_ALLOW.find(([m, re]) => m === req.method && re.test(full));
+  if (!rule) return res.status(403).json({ error: 'Ta funkcja nie jest dostępna dla Twojego konta' });
+  const perms = Array.isArray(req.user.perms) ? req.user.perms : users.CLIENT_PERMS;
+  if (rule[2] && !perms.includes(rule[2])) return res.status(403).json({ error: 'Administrator nie nadał Ci tego uprawnienia' });
+  next();
+});
+
 // ---------- Activity log: what each session does ----------
 const few = (paths) => {
   const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
@@ -187,7 +215,9 @@ app.get('/api/info', (req, res) => {
     desktop,
     root: files.root,
     hostname: os.hostname(),
-    version: updates.versionInfo().version
+    version: updates.versionInfo().version,
+    publicHost: cfg.publicHost || '',
+    perms: req.user && req.user.role === 'client' ? (Array.isArray(req.user.perms) ? req.user.perms : users.CLIENT_PERMS) : undefined
   });
 });
 
@@ -439,7 +469,11 @@ function loadGame(req) {
 }
 const gameLog = (req, text) => sessions.log(req.sid, 'game', text);
 
-app.get('/api/games/templates', (req, res) => res.json(games.templateList()));
+app.get('/api/games/templates', (req, res) => res.json(games.templateList(req.user)));
+app.get('/api/games/plans', (req, res) => {
+  const plans = require('./lib/plans');
+  res.json({ plans: plans.plans(cfg), addons: plans.addons(cfg), graceDays: plans.GRACE_DAYS });
+});
 app.get('/api/games/catalog', wrap(async (req, res) => {
   const q = String(req.query.q || '');
   const [catalog, steam] = await Promise.all([
@@ -459,8 +493,10 @@ app.post('/api/games', json, wrap(async (req, res) => {
 app.get('/api/games/:id', wrap(async (req, res) => { loadGame(req); res.json(await games.status(req.params.id)); }));
 app.get('/api/games/:id/info', wrap(async (req, res) => res.json(games.pub(loadGame(req), req.user))));
 app.post('/api/games/:id/settings', json, wrap(async (req, res) => {
-  loadGame(req);
-  res.json(games.updateSettings(req.params.id, req.body || {}));
+  const s = loadGame(req);
+  const out = games.updateSettings(req.params.id, req.body || {}, { admin: !!req.isAdmin, role: req.user.role, user: req.user });
+  gameLog(req, `Zmieniono ustawienia serwera „${s.name}”`);
+  res.json(out);
 }));
 app.post('/api/games/:id/install', wrap(async (req, res) => {
   const s = loadGame(req);
@@ -472,7 +508,7 @@ for (const action of ['start', 'stop', 'restart']) {
   app.post(`/api/games/:id/${action}`, wrap(async (req, res) => {
     const s = loadGame(req);
     gameLog(req, `${{ start: 'Uruchomiono', stop: 'Zatrzymano', restart: 'Zrestartowano' }[action]} serwer „${s.name}”`);
-    res.json(await games[action](req.params.id));
+    res.json(await games[action](req.params.id, { admin: !!req.isAdmin }));
   }));
 }
 app.get('/api/games/:id/console', wrap(async (req, res) => {
@@ -503,6 +539,56 @@ app.get('/api/games/:id/backup/download', wrap(async (req, res, next) => {
   if (!/^kopia-[\d-]+\.tar\.gz$/.test(name)) throw new HttpError(400, 'Nieprawidłowa nazwa kopii');
   res.download(path.join(games.backupDir(req.params.id), name), name, (err) => { if (err && !res.headersSent) next(err); });
 }));
+app.post('/api/games/:id/backup/restore', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = await games.restoreBackup(req.params.id, String(req.body.name || ''), { admin: !!req.isAdmin });
+  gameLog(req, `Przywrócono kopię ${req.body.name} serwera „${s.name}”`);
+  res.json(out);
+}));
+app.post('/api/games/:id/reset-world', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = await games.resetWorld(req.params.id, req.body || {}, { admin: !!req.isAdmin });
+  gameLog(req, `Reset świata na serwerze „${s.name}” (${out.mode === 'keep' ? 'nowy świat ' + out.world : 'wyczyszczono ' + out.world})`);
+  res.json(out);
+}));
+app.get('/api/games/:id/online', wrap(async (req, res) => { loadGame(req); res.json(await games.online(req.params.id)); }));
+app.get('/api/games/:id/usage', wrap(async (req, res) => { loadGame(req); res.json(await games.usage(req.params.id)); }));
+app.get('/api/games/:id/players', wrap(async (req, res) => { loadGame(req); res.json(games.players(req.params.id)); }));
+app.post('/api/games/:id/players', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const list = String(req.body.list || '');
+  const ids = games.setPlayers(req.params.id, list, req.body.ids);
+  gameLog(req, `Zmieniono listę „${list}” na serwerze „${s.name}” (${ids.length} wpisów)`);
+  res.json({ ids });
+}));
+app.post('/api/games/:id/schedule', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = games.setSchedule(req.params.id, req.body || {}, { admin: !!req.isAdmin });
+  gameLog(req, `Zmieniono harmonogram serwera „${s.name}”`);
+  res.json(out);
+}));
+app.post('/api/games/:id/discord', json, wrap(async (req, res) => {
+  const s = loadGame(req);
+  const out = games.setDiscord(req.params.id, req.body.url, { admin: !!req.isAdmin });
+  gameLog(req, `${out.discordSet ? 'Ustawiono' : 'Usunięto'} webhook Discord serwera „${s.name}”`);
+  res.json(out);
+}));
+// Admin only: plan, add-ons, validity, move to the systemd runtime.
+app.post('/api/games/:id/admin', json, wrap(async (req, res) => {
+  if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');
+  const s = loadGame(req);
+  const b = req.body || {};
+  const out = games.adminSet(req.params.id, { plan: b.plan, addons: b.addons, paidUntil: b.paidUntil, note: b.note });
+  gameLog(req, `Zmieniono pakiet serwera „${s.name}”: ${b.plan || 'brak'}`);
+  res.json(out);
+}));
+app.post('/api/games/:id/migrate', wrap(async (req, res) => {
+  if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');
+  const s = loadGame(req);
+  gameLog(req, `Przeniesiono serwer „${s.name}” na tryb systemd`);
+  res.json(await games.migrate(req.params.id));
+}));
+
 // Config file editing, confined to the template's declared config files.
 function configFileName(s, name) {
   const t = games.templates[s.template];
@@ -605,4 +691,5 @@ server.listen(cfg.port, cfg.host, () => {
   const proto = cfg.https ? 'https' : 'http';
   console.log(`WebPulpit działa: ${proto}://${cfg.host === '0.0.0.0' ? '<IP-serwera>' : cfg.host}:${cfg.port}`);
   console.log(`Pliki jako użytkownik systemowy: ${os.userInfo().username}`);
+  games.startScheduler();
 });

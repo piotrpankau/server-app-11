@@ -85,14 +85,15 @@
       const tabs = h('div', { class: 'gm-tabs' }, ...[
         ['console', 'Konsola'], ['settings', 'Ustawienia'],
         ...(templates.find((t) => t.id === g.template) && hasConfig(g) ? [['config', 'Pliki konfiguracyjne']] : []),
-        ['backups', 'Kopie zapasowe']
+        ['backups', 'Kopie zapasowe'],
+        ...(WD.info.role === 'admin' ? [['plan', 'Pakiet i klient']] : [])
       ].map(([id, label]) => h('button', { class: 'gm-tab' + (tab === id ? ' on' : ''), onclick: () => { if (tab !== id) { disposeTerm(); tab = id; renderDetail(); } } }, label)));
 
       const pane = h('div', { class: 'gm-pane' });
       detail.replaceChildren(
         h('div', { class: 'gm-head' },
           h('span', { class: 'gm-bigico', style: { background: g.icon }, html: '<svg viewBox="0 0 48 48">' + WD.appIcon('games').replace(/^<svg[^>]*>|<\/svg>$/g, '') + '</svg>' }),
-          h('div', { class: 'gm-htext' }, h('h2', {}, g.name), h('div', { class: 'gm-hsub' }, g.templateLabel, ' · porty: ', ports, st.size ? ' · ' + fmt.size(st.size) : '')),
+          h('div', { class: 'gm-htext' }, h('h2', {}, g.name), h('div', { class: 'gm-hsub' }, g.templateLabel, ' · porty: ', ports, st.size ? ' · ' + fmt.size(st.size) : '', g.runtime === 'systemd' ? ' · systemd' + (g.limits && g.limits.planLabel ? ' · pakiet ' + g.limits.planLabel : '') : '')),
           statusPill),
         actions, tabs, pane);
       renderPane(pane, g, st);
@@ -105,6 +106,7 @@
       if (tab === 'settings') return renderSettings(pane, g);
       if (tab === 'config') return renderConfig(pane, g);
       if (tab === 'backups') return renderBackups(pane, g);
+      if (tab === 'plan') return renderPlan(pane, g);
     }
 
     // ----- console -----
@@ -122,14 +124,18 @@
         return;
       }
       const wrap = h('div', { class: 'term-wrap gm-term' });
-      const input = h('input', { class: 'field gm-cmd', placeholder: running(g) ? 'Wpisz komendę serwera i naciśnij Enter…' : 'Serwer zatrzymany', disabled: !running(g) });
-      pane.replaceChildren(wrap, h('div', { class: 'gm-cmdrow' }, input));
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && input.value.trim()) {
-          api.post(`/api/games/${g.id}/command`, { command: input.value }).catch(WD.error);
-          input.value = '';
-        }
-      });
+      if (g.runtime === 'systemd') {
+        pane.replaceChildren(wrap, h('div', { class: 'gm-cmdrow tm-dim' }, 'Podgląd logu na żywo (tylko do odczytu). Serwery Valheim nie mają konsoli komend.'));
+      } else {
+        const input = h('input', { class: 'field gm-cmd', placeholder: running(g) ? 'Wpisz komendę serwera i naciśnij Enter…' : 'Serwer zatrzymany', disabled: !running(g) });
+        pane.replaceChildren(wrap, h('div', { class: 'gm-cmdrow' }, input));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && input.value.trim()) {
+            api.post(`/api/games/${g.id}/command`, { command: input.value }).catch(WD.error);
+            input.value = '';
+          }
+        });
+      }
       openTerm(g.id, wrap);
     }
     const running = (g) => (statusMap[g.id] || {}).running;
@@ -222,6 +228,47 @@
       pane.replaceChildren(
         h('div', { class: 'gm-confhead' }, make, h('span', { class: 'tm-dim' }, 'Kopia zapisuje świat / dane serwera do pliku .tar.gz.')),
         rows.length ? h('div', { class: 'gm-bklist' }, ...rows) : h('div', { class: 'gm-welcome' }, 'Brak kopii zapasowych.'));
+    }
+
+    // ----- plan / client (admin) -----
+    async function renderPlan(pane, g) {
+      pane.replaceChildren(h('div', { class: 'gm-welcome' }, 'Wczytywanie…'));
+      let meta; try { meta = await api.get('/api/games/plans'); } catch (err) { return WD.error(err); }
+      const planSel = h('select', { class: 'field', style: { maxWidth: '320px' } }, h('option', { value: '' }, 'Brak pakietu (bez limitów)'),
+        ...Object.entries(meta.plans).map(([k, p]) => h('option', { value: k, selected: g.plan === k }, `${p.label} · ${p.memoryMb} MB RAM · ${p.backups} kopii${p.schedule ? ' · harmonogram' : ''}`)));
+      const addonBoxes = Object.entries(meta.addons).map(([k, a]) => h('label', { class: 'tm-radio' }, h('input', { type: 'checkbox', value: k, checked: (g.addons || []).includes(k) }), ' ' + a.label));
+      const dateI = h('input', { class: 'field', type: 'date', style: { maxWidth: '200px' }, value: g.paidUntil ? new Date(g.paidUntil).toISOString().slice(0, 10) : '' });
+      const extend = (days) => {
+        const base = g.paidUntil && g.paidUntil > Date.now() ? g.paidUntil : Date.now();
+        dateI.value = new Date(base + days * 86400000).toISOString().slice(0, 10);
+      };
+      const note = h('textarea', { class: 'field', rows: 3, placeholder: 'Notatka (kto, jak zapłacił, kontakt)…' }); note.value = g.note || '';
+      const save = h('button', { class: 'btn primary', onclick: async () => {
+        try {
+          await api.post(`/api/games/${g.id}/admin`, {
+            plan: planSel.value || null,
+            addons: addonBoxes.filter((b) => b.querySelector('input').checked).map((b) => b.querySelector('input').value),
+            paidUntil: dateI.value ? new Date(dateI.value + 'T23:59:59').getTime() : null,
+            note: note.value
+          });
+          WD.toast('Zapisano. Limity zadziałają od następnego startu serwera.', 'ok'); loadAll();
+        } catch (err) { WD.error(err); }
+      } }, 'Zapisz pakiet');
+      const extras = [];
+      if (g.runtime === 'systemd') extras.push(h('button', { class: 'btn', onclick: () => WD.apps.myserver.launch({ id: g.id }) }, 'Otwórz widok klienta'));
+      else if (g.template === 'valheim') extras.push(h('button', { class: 'btn', onclick: async () => {
+        if (!(await WD.confirm('Przenieść na systemd?', 'Serwer zostanie zatrzymany i uruchomiony w trybie hostingowym (osobny użytkownik, limity pakietu, bezpieczne zatrzymywanie).', { okLabel: 'Przenieś' }))) return;
+        try { await api.post(`/api/games/${g.id}/migrate`); WD.toast('Przeniesiono', 'ok'); loadAll(); } catch (err) { WD.error(err); }
+      } }, 'Przenieś na tryb systemd (hosting)'));
+      pane.replaceChildren(h('div', { class: 'gm-form' },
+        h('label', {}, 'Pakiet'), planSel,
+        h('label', {}, 'Opcje dodatkowe'), ...addonBoxes,
+        h('label', {}, `Ważny do (po terminie ${meta.graceDays} dni karencji, potem serwer jest zatrzymywany)`), dateI,
+        h('div', { class: 'gm-formbtns', style: { justifyContent: 'flex-start', gap: '8px', marginTop: '6px' } },
+          h('button', { class: 'btn', onclick: () => extend(30) }, '+30 dni'), h('button', { class: 'btn', onclick: () => extend(90) }, '+90 dni'), h('button', { class: 'btn', onclick: () => { dateI.value = ''; } }, 'Bez terminu')),
+        h('label', {}, 'Notatka (widoczna tylko dla Ciebie)'), note,
+        h('div', { class: 'gm-formbtns', style: { justifyContent: 'flex-start', gap: '8px' } }, save, ...extras),
+        h('div', { class: 'tm-dim', style: { marginTop: '14px' } }, 'Klienta dodasz w aplikacji „Użytkownicy” (rola „Klient hostingu”) i przypiszesz mu ten serwer.')));
     }
 
     // ----- actions -----
@@ -319,6 +366,14 @@
         else { inp = h('input', { class: 'field', type: f.type === 'number' ? 'number' : 'text', value: pre }); fields.push(h('label', {}, f.label), inp); }
         inputs[f.key] = inp;
       }
+      let planSel = null; let daysI = null;
+      if (t.hosted && WD.info.role === 'admin') {
+        let meta = { plans: {} };
+        try { meta = await api.get('/api/games/plans'); } catch { /* optional */ }
+        planSel = h('select', { class: 'field' }, h('option', { value: '' }, 'Brak pakietu (własny serwer, bez limitów)'), ...Object.entries(meta.plans).map(([k, p]) => h('option', { value: k }, `${p.label} · ${p.memoryMb} MB RAM`)));
+        daysI = h('input', { class: 'field', type: 'number', placeholder: 'np. 30 (puste = bez terminu)' });
+        fields.push(h('label', {}, 'Pakiet hostingowy (dla klienta)'), planSel, h('label', {}, 'Ważny przez (dni od dziś)'), daysI);
+      }
       if (t.steam) fields.push(h('p', { class: 'tm-dim', style: { marginTop: '10px' } }, STEAM_HINT));
       const v = await WD.dialog({
         title: 'Nowy serwer: ' + (titleName || t.label),
@@ -331,7 +386,9 @@
       const settings = {};
       for (const [k, inp] of Object.entries(inputs)) settings[k] = inp.type === 'checkbox' ? inp.checked : inp.value;
       try {
-        const g = await api.post('/api/games', { name: nameI.value, template: t.id, settings });
+        const body = { name: nameI.value, template: t.id, settings };
+        if (planSel) { body.plan = planSel.value || null; if (daysI.value) body.paidUntil = Date.now() + Number(daysI.value) * 86400000; }
+        const g = await api.post('/api/games', body);
         WD.toast('Utworzono serwer', 'ok');
         await loadAll();
         select(g.id);
