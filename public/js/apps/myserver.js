@@ -96,12 +96,14 @@
       const paid = g.paid || {};
       const banner = paid.state === 'warn' ? ['warn', `Usługa wygasa za ${paid.daysLeft} ${paid.daysLeft === 1 ? 'dzień' : 'dni'} (${fmt.date(paid.until)}). Skontaktuj się z administratorem, aby ją przedłużyć.`]
         : paid.state === 'grace' ? ['bad', `Usługa wygasła ${fmt.date(paid.until)}. Serwer działa jeszcze do końca okresu karencji (${paid.graceDays} dni), potem zostanie zatrzymany.`]
-        : paid.state === 'expired' ? ['bad', 'Usługa wygasła, serwer jest zatrzymany. Skontaktuj się z administratorem, aby ją przedłużyć.'] : null;
+        : paid.state === 'expired' ? ['bad', 'Usługa wygasła, serwer jest zatrzymany. Skontaktuj się z administratorem, aby ją przedłużyć.']
+        : !st.installing && st.job && st.job.exitCode != null && st.job.exitCode !== 0 ? ['warn', 'Ostatnie pobieranie plików gry ze Steam nie powiodło się. Spróbuj „Aktualizuj Valheim” ponownie za kilka minut.'] : null;
       const lim = g.limits || {};
       const busy = !!st.busy || st.installing;
       const btn = (text, fn, o = {}) => h('button', { class: 'btn ' + (o.cls || ''), disabled: busyUi || busy || o.disabled || !o.perm, title: o.perm ? '' : 'Brak uprawnienia', onclick: fn }, text);
       top.replaceChildren(
-        banner ? h('div', { class: 'ms-banner ' + banner[0] }, banner[1]) : null,
+        // replaceChildren() would print a null as the text "null".
+        ...(banner ? [h('div', { class: 'ms-banner ' + banner[0] }, banner[1])] : []),
         h('div', { class: 'ms-head' },
           h('div', { class: 'ms-title' }, h('h2', {}, g.settings.serverName || g.name), h('div', { class: 'ms-sub' }, g.name, lim.planLabel ? ' · pakiet ' + lim.planLabel : '', paid.until ? ' · ważny do ' + new Date(paid.until).toLocaleDateString('pl-PL') : '')),
           h('span', { class: 'gm-pill ' + cls }, label)),
@@ -117,6 +119,7 @@
         h('div', { class: 'gm-actions ms-actions' },
           st.running ? btn('Zatrzymaj', () => power('stop'), { cls: 'danger', perm: can('power') }) : btn('Uruchom', () => power('start'), { cls: 'primary', perm: can('power'), disabled: !g.installed || paid.state === 'expired' }),
           btn('Restart', () => power('restart'), { perm: can('power'), disabled: !st.running }),
+          btn('Aktualizuj Valheim', () => updateGame(), { perm: can('power'), disabled: !g.installed || paid.state === 'expired' }),
           btn('Kopia zapasowa', () => makeBackup(), { perm: can('backup'), disabled: !g.installed }),
           btn('Reset świata…', () => resetWorld(), { cls: 'danger-outline', perm: can('reset'), disabled: !g.installed })));
     }
@@ -134,6 +137,11 @@
       if (action === 'restart' && on.count > 0 && !(await WD.confirm('Gracze są online', `Na serwerze gra teraz ${on.count} os. Restart ich rozłączy. Kontynuować?`, { okLabel: 'Restartuj', danger: true }))) return;
       await api.post(`/api/games/${g.id}/${action}`);
       WD.toast({ start: 'Serwer się uruchamia…', stop: 'Serwer zatrzymany', restart: 'Serwer zrestartowany' }[action], 'ok');
+    });
+    const updateGame = () => guarded(async () => {
+      if (!(await WD.confirm('Aktualizować Valheim?', `Gdy gra dostanie łatkę, gracze z nową wersją nie wejdą na serwer, dopóki go nie zaktualizujesz. Serwer zapisze świat, zatrzyma się, pobierze nowe pliki ze Steam (kilka minut) i ${st.running ? 'sam uruchomi się ponownie' : 'pozostanie zatrzymany'}.${on.count > 0 ? ` Teraz gra ${on.count} os. – zostaną rozłączeni.` : ''}${g.settings.modded ? ' Po dużej łatce część modów może wymagać aktualizacji (zakładka „Mody”).' : ''}`, { okLabel: 'Aktualizuj' }))) return;
+      await api.post(`/api/games/${g.id}/update`);
+      WD.toast('Aktualizacja rozpoczęta. Stan widać u góry okna.', 'ok');
     });
     const makeBackup = () => guarded(async () => {
       await api.post(`/api/games/${g.id}/backup`);

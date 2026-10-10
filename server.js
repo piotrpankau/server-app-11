@@ -122,10 +122,11 @@ const CLIENT_ALLOW = [
   ['POST', /^\/api\/password$/, null],
   ['GET', /^\/api\/events$/, null],
   ['GET', /^\/api\/games$/, null],
+  ['GET', /^\/api\/gambit\/current$/, null],
   ['GET', new RegExp(`^${G}$`), null],
   ['GET', new RegExp(`^${G}/(info|console|usage|online|players)$`), null],
   ['GET', new RegExp(`^${G}/(backups|backup/download)$`), 'backup'],
-  ['POST', new RegExp(`^${G}/(start|stop|restart)$`), 'power'],
+  ['POST', new RegExp(`^${G}/(start|stop|restart|update)$`), 'power'],
   ['POST', new RegExp(`^${G}/reset-world$`), 'reset'],
   ['POST', new RegExp(`^${G}/(backup|backup/delete|backup/restore)$`), 'backup'],
   ['POST', new RegExp(`^${G}/(settings|discord)$`), 'settings'],
@@ -514,6 +515,11 @@ for (const action of ['start', 'stop', 'restart']) {
     res.json(await games[action](req.params.id, { admin: !!req.isAdmin }));
   }));
 }
+app.post('/api/games/:id/update', wrap(async (req, res) => {
+  const s = loadGame(req);
+  gameLog(req, `Aktualizacja gry na serwerze „${s.name}”`);
+  res.json(games.update(req.params.id, { admin: !!req.isAdmin }));
+}));
 app.get('/api/games/:id/console', wrap(async (req, res) => {
   loadGame(req);
   res.type('text/plain; charset=utf-8').send(await games.consoleTail(req.params.id, Number(req.query.lines) || 200));
@@ -701,6 +707,57 @@ app.post('/api/gambit/delete', json, wrap(async (req, res) => {
   sessions.log(req.sid, 'file', `Usunięto wersję gry: ${out.removed}`);
   res.json(out);
 }));
+// The build customers play (newest unless the admin fixed one), and the admin's choice.
+app.get('/api/gambit/current', (req, res) => res.json(gambit.current(cfg, req.query.fresh === '1')));
+app.post('/api/gambit/clients', json, wrap(async (req, res) => {
+  if (!req.isAdmin) throw new HttpError(403, 'Tylko administrator');
+  const out = gambit.setClientChoice(cfg, req.body || {});
+  sessions.log(req.sid, 'system', req.body && req.body.mode === 'fixed' ? `Klienci grają teraz w wersję ${out && out.label}` : 'Klienci grają zawsze w najnowszą wersję gry');
+  res.json(out);
+}));
+
+// The game itself, served by the panel at /play/<build>/: same login as the panel (no separate site
+// password), works inside a panel window, and /play/ always leads to the current build. A small script
+// added to the page tells a player who keeps the game open that a newer version is ready.
+const PLAY_WATCH = `<script>(function(){var v=__V__;var shown=false;function check(){fetch('/api/gambit/current',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.json():null}).then(function(c){if(!c||c.version===v||shown)return;shown=true;var d=document.createElement('div');d.setAttribute('style','position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99999;background:#1f2a37;color:#fff;font:15px/1.35 system-ui,sans-serif;padding:10px 14px;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.5);display:flex;gap:10px;align-items:center;max-width:92vw');d.innerHTML='<span>Jest nowa wersja gry.</span>';var b=document.createElement('button');b.textContent='Aktualizuj teraz';b.setAttribute('style','background:#3b82f6;color:#fff;border:0;border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer');b.onclick=function(){location.replace('/play/')};var x=document.createElement('button');x.textContent='Później';x.setAttribute('style','background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer');x.onclick=function(){d.remove()};d.append(b,x);document.body.appendChild(d)}).catch(function(){})}setInterval(check,60000);})();</script>`;
+app.get(['/play', '/play/'], (req, res) => {
+  const c = gambit.current(cfg, true);
+  if (!c) return res.status(404).type('text/plain; charset=utf-8').send('Nie ma jeszcze żadnej wersji gry na serwerze.');
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, c.url);
+});
+// Exact match only (a string route would also catch "/play/<id>/" and loop).
+app.get(/^\/play\/([a-f0-9]{10})$/, (req, res) => res.redirect(301, `/play/${req.params[0]}/`));
+app.get('/play/:id/*', wrap(async (req, res, next) => {
+  const id = String(req.params.id);
+  const c = gambit.current(cfg);
+  // Customers play only the current build; an old link takes them to the new one.
+  if (req.user.role === 'client' && (!c || c.id !== id)) return res.redirect(302, '/play/');
+  const dir = /^[a-f0-9]{10}$/.test(id) && gambit.buildDir(cfg, id);
+  if (!dir) return res.redirect(302, '/play/');
+  const rel = req.params[0] || 'index.html';
+  const file = path.resolve(dir, rel);
+  if (!file.startsWith(dir + path.sep) || /(^|\/)\./.test(rel)) return res.status(404).end();
+  res.setHeader('Cache-Control', 'no-cache');
+  if (rel === 'index.html') {
+    let html = await fs.promises.readFile(file, 'utf8');
+    const b = gambit.discover(cfg).find((x) => x.id === id);
+    const version = b ? `${b.id}-${Math.round(b.mtime)}` : '';
+    html = html.replace(/<\/body>/i, PLAY_WATCH.replace('__V__', JSON.stringify(version)) + '</body>');
+    return res.type('html').send(html);
+  }
+  res.sendFile(file, { dotfiles: 'deny' }, (err) => { if (err && !res.headersSent) next(err); });
+}));
+// The game sends finished matches to /telemetry on its own site; pass them to the local receiver.
+app.post('/telemetry', (req, res) => {
+  const up = http.request({ host: '127.0.0.1', port: 8787, path: '/telemetry', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': req.headers['content-length'] || 0 }, timeout: 10000 }, (r) => {
+    res.status(r.statusCode || 502);
+    r.pipe(res);
+  });
+  up.on('error', () => { if (!res.headersSent) res.status(502).end(); });
+  up.on('timeout', () => up.destroy());
+  req.pipe(up);
+});
 
 // ---------- Asystent Claude ----------
 app.get('/api/assistant/settings', (req, res) => res.json(assistant.publicSettings(cfg)));

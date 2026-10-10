@@ -39,7 +39,7 @@ fi
 # ---------- 1. Pakiety systemowe ----------
 if [ "$MODE" = install ]; then
   say "Instaluję wymagane pakiety (może chwilę potrwać)…"
-  export DEBIAN_FRONTEND=noninteractive
+  export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
   # A single broken third-party repository (e.g. an old Steam or PPA entry) makes
   # "apt-get update" fail. That should not stop the installation.
   if ! apt-get update -y >/dev/null 2>/tmp/webpulpit-apt.log; then
@@ -48,10 +48,13 @@ if [ "$MODE" = install ]; then
     warn "Kontynuuję instalację. Aby naprawić, usuń to repozytorium z /etc/apt/sources.list.d/"
   fi
   # tmux + Java run game servers; lib32gcc is needed by SteamCMD on 64-bit systems.
-  dpkg --add-architecture i386 >/dev/null 2>&1 || true
-  apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 tmux default-jre-headless lib32gcc-s1 >/dev/null 2>&1 \
-    || apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 tmux >/dev/null \
+  apt-get install -y ca-certificates curl git openssl unzip zip tar build-essential python3 tmux >/dev/null \
     || die "Nie udało się zainstalować pakietów. Napraw repozytoria apt (patrz komunikaty wyżej) i uruchom ponownie."
+  # Installed one by one, so one missing package does not silently skip the others.
+  # lib32gcc-s1: SteamCMD (32-bit), libatomic1 + libpulse0: Valheim server, Java: Minecraft.
+  for pkg in lib32gcc-s1 libatomic1 libpulse0 default-jre-headless; do
+    apt-get install -y "$pkg" >/dev/null 2>&1 || warn "Nie udało się zainstalować $pkg (serwery gier mogą go potrzebować)."
+  done
 
   NODE_MAJOR=0
   if command -v node >/dev/null 2>&1; then

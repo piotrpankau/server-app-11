@@ -49,6 +49,10 @@ Pulpit w stylu Windows dla serwera Ubuntu, otwierany w przeglądarce. Nie trzeba
 - **Emperor's Gambit** (aplikacja do testowania gry): lista wszystkich wdrożonych wersji webowych, wykrywanych automatycznie z konfiguracji Caddy
   i podfolderów (np. `0.8.2/P`). Każda wersja ma przyciski **Uruchom** (nowa karta), **W oknie** (w oknie panelu), **APK**, **Link**;
   administrator może nazwać, przypiąć i usunąć starą wersję. Nowy deploy pojawia się na liście sam. Opcjonalnie `gambit.caddyfile` w `config.json`.
+  - **Klienci hostingu** też mają aplikację Emperor's Gambit: jeden przycisk „Graj”, zawsze najnowsza wersja (gra aktualizuje się sama).
+    Gra idzie przez panel (`/play/`), więc nie potrzeba osobnego hasła strony testowej. Jeśli nowa wersja wyjdzie w trakcie gry,
+    w grze pojawia się „Aktualizuj teraz”. Build liczy się jako nowy 2 minuty po deployu, żeby nikt nie wczytał niedokończonego.
+    Administrator może zamiast tego wskazać jedną wersję dla klientów (lista „Klienci hostingu grają w:”).
 - **Serwery gier** (aplikacja „Serwery gier”) – mały panel hostingowy dla Ciebie i znajomych:
   - **wyszukiwarka gier**: wpisujesz nazwę (np. „Rust”, „Palworld”, „ARK”), a panel sam podpowiada dane do instalacji – AppID serwera ze Steam, komendę startową i porty (z wbudowanego katalogu popularnych gier oraz podpowiedzi na żywo ze Steam),
   - gotowe szablony: **Valheim**, **Counter-Strike 2**, **Minecraft (Java)**, dowolna inna gra ze **Steam** (podajesz AppID) albo własne polecenie startowe,
@@ -71,7 +75,13 @@ zużycie pamięci i procesora, harmonogram (codzienny restart tylko gdy nikt nie
 - Każdy serwer klienta to osobna usługa systemd `wpsrv-<id>` z osobnym użytkownikiem Linux `wpg-<id>`.
   Zatrzymanie wysyła SIGINT i czeka do 5 minut, więc Valheim zdąży zapisać świat.
 - Limity pamięci i procesora wynikają z pakietu. Usługa ma niski priorytet i jest zabijana przez jądro przed głównym serwerem.
-- Porty przydzielają się same (od 2466, po 3 na serwer), z pominięciem 2456–2458. Otwórz je w Linode Cloud Firewall (UDP).
+- Porty przydzielają się same (od 2466, po 3 na serwer), z pominięciem 2456–2458. Gdy na maszynie działa zapora `ufw`,
+  panel sam otwiera porty serwera przy starcie (reguła z komentarzem `webpulpit <id>`) i zamyka je po usunięciu serwera.
+  Zaporę dostawcy (Linode Cloud Firewall, grupy zabezpieczeń Scaleway itp.) trzeba ustawić samemu: UDP 2466–2800.
+- Serwer klienta wstaje sam po restarcie maszyny. Jeśli klient go zatrzymał, zostaje zatrzymany.
+- **Aktualizacja Valheima**: po łatce gry gracze z nową wersją nie wejdą na stary serwer. Klient klika „Aktualizuj Valheim”
+  (serwer zapisuje świat, pobiera nowe pliki ze Steam i sam wstaje), a codzienny restart z harmonogramu robi to automatycznie.
+- Reset świata obsługuje oba formaty zapisu Valheima: stary (`świat.db` / `.fwl`) i nowy (folder `worlds_local/<świat>/`).
 - Rola `client` działa na liście dozwolonych endpointów (wszystko inne to 403). Restart, reset i przywracanie mają limit raz na minutę.
 
 **Jak dodać klienta**
