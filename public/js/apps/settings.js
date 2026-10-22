@@ -1,5 +1,5 @@
 'use strict';
-/* Settings ("Ustawienia"): theme, wallpaper, password. */
+/* Settings ("Ustawienia"): theme, wallpaper, password, two-step login. */
 (function (WD) {
   const { h, api } = WD;
 
@@ -69,6 +69,46 @@
       } catch (err) { WD.error(err); }
     });
 
+    // Two-step login: QR for Google Authenticator, saved only after the first correct code.
+    const totpBox = h('div', { class: 'pw-form' });
+    function totpOff() {
+      const pw = h('input', { class: 'field', type: 'password', placeholder: 'Hasło, aby wyłączyć', autocomplete: 'current-password' });
+      const btn = h('button', { class: 'btn', style: { justifySelf: 'start' } }, 'Wyłącz kod przy logowaniu');
+      btn.addEventListener('click', async () => {
+        try {
+          await api.post('/api/totp/disable', { password: pw.value });
+          WD.toast('Logowanie z kodem wyłączone', 'ok');
+          totpOn();
+        } catch (err) { WD.error(err); }
+      });
+      totpBox.replaceChildren(h('div', { class: 'about' }, 'Włączone: przy logowaniu na nowym urządzeniu panel pyta o kod z aplikacji (zaufane urządzenie pamięta to przez 30 dni).'), pw, btn);
+    }
+    function totpOn() {
+      const btn = h('button', { class: 'btn primary', style: { justifySelf: 'start' } }, 'Włącz kod z Google Authenticator');
+      btn.addEventListener('click', async () => {
+        try {
+          const r = await api.post('/api/totp/setup');
+          const qr = h('div', { style: { width: '200px', background: '#fff' } });
+          qr.innerHTML = r.qr;
+          const code = h('input', { class: 'field', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6, placeholder: 'Kod z aplikacji (6 cyfr)' });
+          const ok = h('button', { class: 'btn primary', style: { justifySelf: 'start' } }, 'Potwierdź i włącz');
+          ok.addEventListener('click', async () => {
+            try {
+              await api.post('/api/totp/enable', { code: code.value });
+              WD.toast('Logowanie z kodem włączone', 'ok');
+              totpOff();
+            } catch (err) { WD.error(err); }
+          });
+          totpBox.replaceChildren(
+            h('div', { class: 'about' }, 'Zeskanuj kod w Google Authenticator (+ → Zeskanuj kod QR) albo wpisz klucz ręcznie:'),
+            qr, h('code', { style: { userSelect: 'all', wordBreak: 'break-all' } }, r.secret), code, ok);
+          code.focus();
+        } catch (err) { WD.error(err); }
+      });
+      totpBox.replaceChildren(h('div', { class: 'about' }, 'Wyłączone: do logowania wystarczy hasło.'), btn);
+    }
+    api.get('/api/totp').then((r) => (r.enabled ? totpOff() : totpOn())).catch(WD.error);
+
     const info = WD.info;
     const root = h('div', { class: 'settings' },
       h('h3', {}, 'Motyw'),
@@ -77,6 +117,8 @@
       walls,
       h('h3', {}, 'Hasło do panelu'),
       h('div', { class: 'pw-form' }, oldPw, newPw, newPw2, pwBtn),
+      h('h3', {}, 'Logowanie z kodem (Google Authenticator)'),
+      totpBox,
       WD.info.role === 'admin' ? h('h3', {}, 'Aktualizacje') : null,
       WD.info.role === 'admin' ? h('div', { class: 'upd-row' }, h('span', { class: 'grow about' }, 'Aktualizacje WebPulpit (z GitHuba) i systemu Ubuntu.'),
         h('button', { class: 'btn primary', onclick: () => WD.apps.updates.launch() }, 'Otwórz Aktualizacje')) : null,

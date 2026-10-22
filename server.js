@@ -8,6 +8,7 @@ const express = require('express');
 
 const config = require('./lib/config');
 const auth = require('./lib/auth');
+const totp = require('./lib/totp');
 const users = require('./lib/users');
 const sessions = require('./lib/sessions');
 const taskmgr = require('./lib/taskmgr');
@@ -60,15 +61,38 @@ app.post('/api/login', express.json({ limit: '10kb' }), (req, res) => {
     console.warn(`[login] nieudane logowanie z ${ip} (użytkownik: ${String(username).slice(0, 40)})`);
     return res.status(401).json({ error: 'Nieprawidłowy login lub hasło' });
   }
+  // Two-step login: a trusted device (cookie or the desktop app's stored token) skips the code.
+  let trust;
+  if (user.totpSecret) {
+    const given = req.body.trust || auth.parseCookies(req.headers.cookie)[TRUST_COOKIE];
+    if (!totp.checkTrust(cfg, user, given)) {
+      if (!req.body.code) return res.status(401).json({ error: 'Podaj kod z aplikacji Google Authenticator', needCode: true });
+      if (!totp.verify(user.totpSecret, req.body.code, user.id)) {
+        auth.registerFailure(ip);
+        console.warn(`[login] zły kod 2FA z ${ip} (użytkownik: ${user.username})`);
+        return res.status(401).json({ error: 'Nieprawidłowy kod', needCode: true });
+      }
+      trust = totp.trustToken(cfg, user);
+    }
+  }
   auth.clearFailures(ip);
   const session = sessions.create(req, cfg.sessionHours);
   session.user = user.username;
   console.log(`[login] zalogowano ${user.username} z ${ip} (${session.browser}, ${session.os})`);
   sessions.log(session.sid, 'login', `Zalogowano jako ${user.username} z ${session.ip} (${session.browser} na ${session.os})`);
   sessions.broadcast('login', { sid: session.sid, ip: session.ip, browser: session.browser, os: session.os, user: user.username }, session.sid);
-  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, session.sid, user), cfg.sessionHours * 3600));
-  res.json({ ok: true });
+  const cookies = [auth.cookieHeader(cfg, auth.createToken(cfg, session.sid, user), cfg.sessionHours * 3600)];
+  if (trust) cookies.push(trustCookie(trust, totp.TRUST_DAYS * 86400));
+  res.setHeader('Set-Cookie', cookies);
+  res.json(trust ? { ok: true, trust } : { ok: true });
 });
+
+const TRUST_COOKIE = 'wp_trust';
+function trustCookie(token, maxAgeSec) {
+  const parts = [`${TRUST_COOKIE}=${token}`, 'Path=/api/login', 'HttpOnly', 'SameSite=Strict', `Max-Age=${maxAgeSec}`];
+  if (cfg.https) parts.push('Secure');
+  return parts.join('; ');
+}
 
 app.post('/api/logout', (req, res) => {
   const tok = auth.sessionFromRequest(cfg, req);
@@ -120,6 +144,8 @@ const G = '/api/games/[a-f0-9]{10}';
 const CLIENT_ALLOW = [
   ['GET', /^\/api\/info$/, null],
   ['POST', /^\/api\/password$/, null],
+  ['GET', /^\/api\/totp$/, null],
+  ['POST', /^\/api\/totp\/(setup|enable|disable)$/, null],
   ['GET', /^\/api\/events$/, null],
   ['GET', /^\/api\/games$/, null],
   ['GET', /^\/api\/gambit\/current$/, null],
@@ -172,6 +198,8 @@ const ACTIVITY = {
   'POST /api/update/system': ['system', () => 'Rozpoczęto aktualizację pakietów systemu'],
   'POST /api/reboot': ['system', () => 'Uruchomiono ponownie serwer'],
   'POST /api/password': ['security', () => 'Zmieniono hasło do panelu'],
+  'POST /api/totp/enable': ['security', () => 'Włączono logowanie z kodem (Google Authenticator)'],
+  'POST /api/totp/disable': ['security', () => 'Wyłączono logowanie z kodem (Google Authenticator)'],
   'POST /api/assistant/settings': ['assistant', (q) => (typeof q.body.apiKey === 'string' ? (q.body.apiKey ? 'Zmieniono klucz API asystenta' : 'Usunięto klucz API asystenta') : 'Zmieniono ustawienia asystenta')],
   'POST /api/assistant/conv/delete': ['assistant', () => 'Usunięto rozmowę z asystentem'],
   'POST /api/panel/revoke': ['security', (q) => `Wylogowano sesję: ${q.revokedName || q.body.sid}`],
@@ -386,6 +414,30 @@ app.post('/api/password', json, wrap(async (req, res) => {
   // Only this user's other sessions become invalid (their token no longer matches).
   for (const s of sessions.list(req.sid)) if (s.active && !s.current && s.user === req.user.username) sessions.revoke(s.sid, 'zmiana hasła');
   res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, req.sid, req.user), cfg.sessionHours * 3600));
+  res.json({ ok: true });
+}));
+
+// ---------- Two-step login (own account) ----------
+const pendingTotp = new Map(); // user id -> secret shown in the QR code, saved after the first correct code
+app.get('/api/totp', (req, res) => res.json({ enabled: !!(req.user && req.user.totpSecret) }));
+app.post('/api/totp/setup', json, wrap(async (req, res) => {
+  if (!req.user) throw new HttpError(403, 'Brak użytkownika');
+  const secret = totp.newSecret();
+  pendingTotp.set(req.user.id, secret);
+  const uri = totp.uri(secret, req.user.username, `WebPulpit ${os.hostname()}`);
+  res.json({ secret, uri, qr: await require('qrcode').toString(uri, { type: 'svg', margin: 2 }) });
+}));
+app.post('/api/totp/enable', json, wrap(async (req, res) => {
+  const secret = req.user && pendingTotp.get(req.user.id);
+  if (!secret) throw new HttpError(400, 'Najpierw wygeneruj kod QR');
+  if (!totp.verify(secret, (req.body || {}).code, req.user.id)) throw new HttpError(400, 'Nieprawidłowy kod, spróbuj z następnym');
+  pendingTotp.delete(req.user.id);
+  users.setTotp(cfg, req.user.id, secret);
+  res.json({ ok: true });
+}));
+app.post('/api/totp/disable', json, wrap(async (req, res) => {
+  if (!req.user || !users.verifyPassword((req.body || {}).password || '', req.user.passwordHash)) throw new HttpError(403, 'Hasło jest nieprawidłowe');
+  users.setTotp(cfg, req.user.id, null);
   res.json({ ok: true });
 }));
 

@@ -16,6 +16,7 @@
     <p class="login-sub" id="host">Zaloguj się do serwera</p>
     <input name="username" id="username" placeholder="Login" autocomplete="username" required autofocus>
     <input name="password" id="password" type="password" placeholder="Hasło" autocomplete="current-password" required>
+    <input name="code" id="code" placeholder="Kod z Google Authenticator" inputmode="numeric" autocomplete="one-time-code" maxlength="6" hidden>
     <button type="submit" id="submit">Zaloguj</button>
     <p class="login-error" id="error" role="alert"></p>
   </form>
@@ -25,6 +26,7 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const err = document.getElementById('error');
   const btn = document.getElementById('submit');
+  const code = document.getElementById('code');
   err.textContent = '';
   btn.disabled = true;
   try {
@@ -33,15 +35,23 @@ document.getElementById('form').addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: document.getElementById('username').value,
-        password: document.getElementById('password').value
+        password: document.getElementById('password').value,
+        code: code.hidden ? undefined : code.value
       })
     });
     const data = await res.json().catch(() => ({}));
+    if (data.needCode && code.hidden) {
+      code.hidden = false;
+      code.required = true;
+      code.focus();
+      err.textContent = data.error;
+      return;
+    }
     if (!res.ok) throw new Error(data.error || 'Błąd logowania');
     location.href = '/';
   } catch (ex) {
     err.textContent = ex.message;
-    document.getElementById('password').select();
+    (code.hidden ? document.getElementById('password') : code).select();
   } finally {
     btn.disabled = false;
   }
