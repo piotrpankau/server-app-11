@@ -1,4 +1,5 @@
 'use strict';
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -104,6 +105,26 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// One-time game link: the desktop app (c1) has no browser inside, so "Graj" opens the system
+// browser with a link that logs the player in once (60 s, single use) and lands on the game.
+const playLinks = new Map();
+const PLAY_LINK_MS = 60 * 1000;
+app.get('/play/login', (req, res) => {
+  const t = String(req.query.t || '');
+  const link = playLinks.get(t);
+  playLinks.delete(t);
+  const user = link && link.exp > Date.now() && sessions.isValid(link.sid) && users.byId(cfg, link.uid);
+  if (!user) return res.redirect(302, '/login');
+  const session = sessions.create(req, cfg.sessionHours);
+  session.user = user.username;
+  console.log(`[login] link do gry: ${user.username} z ${req.ip} (${session.browser}, ${session.os})`);
+  sessions.log(session.sid, 'login', `Zalogowano linkiem do gry z aplikacji jako ${user.username} z ${session.ip} (${session.browser} na ${session.os})`);
+  sessions.broadcast('login', { sid: session.sid, ip: session.ip, browser: session.browser, os: session.os, user: user.username }, session.sid);
+  res.setHeader('Set-Cookie', auth.cookieHeader(cfg, auth.createToken(cfg, session.sid, user), cfg.sessionHours * 3600));
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, link.to);
+});
+
 // ---------- Everything below requires a session ----------
 app.use((req, res, next) => {
   const tok = auth.sessionFromRequest(cfg, req);
@@ -149,6 +170,7 @@ const CLIENT_ALLOW = [
   ['GET', /^\/api\/events$/, null],
   ['GET', /^\/api\/games$/, null],
   ['GET', /^\/api\/gambit\/current$/, null],
+  ['POST', /^\/api\/gambit\/play-link$/, null],
   ['GET', new RegExp(`^${G}$`), null],
   ['GET', new RegExp(`^${G}/(info|console|usage|online|players)$`), null],
   ['GET', new RegExp(`^${G}/(backups|backup/download)$`), 'backup'],
@@ -767,6 +789,16 @@ app.post('/api/gambit/clients', json, wrap(async (req, res) => {
   sessions.log(req.sid, 'system', req.body && req.body.mode === 'fixed' ? `Klienci grają teraz w wersję ${out && out.label}` : 'Klienci grają zawsze w najnowszą wersję gry');
   res.json(out);
 }));
+
+app.post('/api/gambit/play-link', json, (req, res) => {
+  const to = String((req.body && req.body.to) || '/play/');
+  if (!/^\/play\/([a-f0-9]{10}\/)?$/.test(to)) throw new HttpError(400, 'Zły adres gry');
+  const now = Date.now();
+  for (const [k, v] of playLinks) if (v.exp <= now) playLinks.delete(k);
+  const t = crypto.randomBytes(24).toString('base64url');
+  playLinks.set(t, { uid: req.user.id, sid: req.sid, to, exp: now + PLAY_LINK_MS });
+  res.json({ url: `/play/login?t=${t}` });
+});
 
 // The game itself, served by the panel at /play/<build>/: same login as the panel (no separate site
 // password), works inside a panel window, and /play/ always leads to the current build. A small script
