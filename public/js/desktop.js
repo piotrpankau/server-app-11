@@ -18,7 +18,8 @@
     { name: 'Menedżer zadań', icon: 'monitor', admin: true, open: () => WD.apps.monitor.launch() },
     { name: 'Notatnik', icon: 'editor', admin: true, open: () => WD.apps.editor.launch({}) },
     { name: 'Użytkownicy', icon: 'people', admin: true, open: () => WD.apps.users.launch() },
-    { name: 'Ustawienia', icon: 'settings', client: true, open: () => WD.apps.settings.launch() }
+    { name: 'Ustawienia', icon: 'settings', client: true, open: () => WD.apps.settings.launch() },
+    ...WD.apps.extapps.entries()
   ]).filter(visible);
 
   let deskEntries = [];
@@ -31,6 +32,7 @@
       document.body.textContent = 'Nie można połączyć się z serwerem: ' + err.message;
       return;
     }
+    await WD.apps.extapps.load();
     WD.fillIcons();
     WD.applyAppearance();
     document.title = `WebPulpit — ${WD.info.hostname}`;
@@ -252,7 +254,8 @@
       { name: 'Sesje', icon: 'sessions', admin: true, open: () => WD.apps.sessions.launch() },
       { name: 'Aktualizacje', icon: 'updates', admin: true, open: () => WD.apps.updates.launch() },
       { name: 'Ustawienia', icon: 'settings', client: true, open: () => WD.apps.settings.launch() },
-      { name: 'Wyślij pliki', icon: 'upload', admin: true, open: () => WD.pickAndUpload(WD.info.desktop, false) }
+      { name: 'Wyślij pliki', icon: 'upload', admin: true, open: () => WD.pickAndUpload(WD.info.desktop, false) },
+      ...WD.apps.extapps.entries()
     ].filter(visible);
   }
 
